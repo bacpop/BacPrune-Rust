@@ -1,0 +1,16 @@
+[package]
+name = "rust_prune_4"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+csv = "1.1"
+polars = { version = "0.28.0", features = ["lazy"] }
+ndarray = "0.15.6"
+ndarray-rand = "0.14.0"
+ndarray-stats = "0.5.1"
+noisy_float = "0.2.0"
+poloto = "18.0.6"
+ndarray-csv = "0.5.1"
