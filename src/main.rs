@@ -36,20 +36,18 @@ fn main() {
     //Calculate MAF
     let mafs = calc_maf(raw_gt_data.clone()); //fix gt_data ownership issue that reqs you to clone gt_data
     println!("{:?}", mafs);
-    println!("MAFs were successfully calculated.");
+    println!("Minor allele frequencies were successfully calculated.");
     
     //Discard variants with MAF below cutoff
-     //Update V after discarding variants
-     let cutoff = 0.01f64;
-     let filtered_gt_data = raw_gt_data.clone();
-     let dummy = maf_prune(raw_gt_data, mafs, &cutoff);
-     println!("Dummy is: {:?}", dummy);
-
+    //Update V after discarding variants
+    let cutoff = 0.01f64;
+    let filtered_gt_data = maf_prune(raw_gt_data.clone(), mafs, &cutoff);
+    println!("Data were successfully filtered by MAF.");
 
     //Generate pairwise matrix of D' values
     //This is where the calc D prime function is used
-    let d_primeee = calculate_d_prime(filtered_gt_data, 2, 353); // fix MAF cloning issue
-    println!("D prime was calculated to be: {:?}", d_primeee)
+    let d_prime_score = calculate_d_prime(filtered_gt_data, 2usize, 353usize); // fix MAF cloning issue
+    println!("D' was calculated to be: {:?}", d_prime_score);
 
     //LD Prune (return dataset minus the pruned variants)
 
@@ -61,7 +59,7 @@ fn read_csv(path_to_file: &str) -> Array2<f64> {
     //1000 cols, 604 rows (incl. headers)
     let file = File::open(path_to_file).expect("File not found :(");
     let mut reader = ReaderBuilder::new().has_headers(true).from_reader(file);
-    reader.deserialize_array2::<f64>((603, 1000)).expect("Failed to unwrap csv file.")
+    reader.deserialize_array2::<f64>((603, 1000)).expect("Failed to unwrap .csv file.")
 }
 
 fn calc_maf(data:Array2<f64>) -> Array1<f64> {
@@ -83,12 +81,9 @@ fn maf_prune(data:Array2<f64>, mafs:Array1<f64>, cutoff:&f64) -> Array2<f64> {
     return filtered_data;
 }
 
-fn calculate_d_prime(data: ArrayBase<OwnedRepr<f64>, Dim<[usize; 2]>>, varianta:i32, variantb:i32) -> f64 {
-    
+fn calculate_d_prime(data: ArrayBase<OwnedRepr<f64>, Dim<[usize; 2]>>, varianta:usize, variantb:usize) -> f64 {
     //Calculate the allele frequencies
     let allele_frequencies: ArrayBase<ndarray::OwnedRepr<f64>, Dim<[usize; 2]>> = find_allele_frequencies(data.clone());
-    println!("{:?}", allele_frequencies);
-    println!("AFs were successfully calculated.");
 
     //Calculate haplotype frequencies for  given pair of variants
     let haplotype_frequencies = find_haplotype_frequencies(data, varianta, variantb);
@@ -107,7 +102,7 @@ fn calculate_d_prime(data: ArrayBase<OwnedRepr<f64>, Dim<[usize; 2]>>, varianta:
         return allele_frequencies; //allele_freqs0 in first row, allele_freqs1 in second row
     }
     
-    fn find_haplotype_frequencies(data:Array2<f64>, varianta:i32, variantb:i32) -> Array1<f64> { // variantA/variantB is the index number of the variant
+    fn find_haplotype_frequencies(data:Array2<f64>, varianta:usize, variantb:usize) -> Array1<f64> { // variantA/variantB is the index number of the variant
         // Create array (ab) containing just variant A and variant B from the dataset
         // To make this more efficient, could take values directly from the dataset for next steps
         // instead of creating new array
@@ -135,44 +130,33 @@ fn calculate_d_prime(data: ArrayBase<OwnedRepr<f64>, Dim<[usize; 2]>>, varianta:
     }
 
     //Calculate D prime score for a given pair of variants
-    fn calc_d_prime(allele_freqs:Array2<f64>, haplotype_freqs:Array1<f64>, varianta:i32, variantb:i32) -> f64 {
+    fn calc_d_prime(allele_freqs:Array2<f64>, haplotype_freqs:Array1<f64>, varianta:usize, variantb:usize) -> f64 {
         
         //Caclulate D score for given pair of variants
         // D = f(00)*f(11)-f(10)*f(01)
         let d_score = (haplotype_freqs[[0]]*haplotype_freqs[[3]]) - (haplotype_freqs[[1]]*haplotype_freqs[[2]]);
-        println!("D score was successfully calculated as: {:?}", d_score);
-
-        //read variants as usize not i32
-        let varianta = varianta.try_into().expect("VariantA failed to convert from i32 to usize during D' calculation.");
-        let variantb = variantb.try_into().expect("VariantB failed to convert from i32 to usize during D' calculation.");
 
         if d_score < 0.0 {
             //Get D max set: -f(A)f(B) and -f(a)f(b)
             let d_max_set:Vec<f64> = vec![-1f64*(allele_freqs[[0,varianta]])*(allele_freqs[[0, variantb]]), -1f64*(allele_freqs[[1, varianta]])*(allele_freqs[[1, variantb]])];
-            println!("max D max pre sorting : {:?} end", d_max_set);
-
             //Get Dmax value (max of D max set)
             let d_max = d_max_set.iter().max_by(|a,b| a.total_cmp(b)).expect("Ooops");
-            println!("max D max post sorting : {:?} end", d_max);
-
             //Calculate D prime score
             let d_prime_score = d_score/d_max;
             return d_prime_score;
+
         } else if d_score > 0.0 {
             //Get D max set: f(A)f(b) and f(a)f(B)
             let d_max_set:Vec<f64> = vec![(allele_freqs[[0,varianta]])*(allele_freqs[[1, variantb]]), (allele_freqs[[1, varianta]])*(allele_freqs[[0, variantb]])];
-            println!("min D max pre sorting : {:?} end", d_max_set);
-
             //Get Dmax value (min of D max set)
             let d_max = d_max_set.iter().min_by(|a,b| a.total_cmp(b)).expect("Ooops");
-            println!("min D max post sorting : {:?} end", d_max);
-
             //Calculate D prime score
             let d_prime_score = d_score/d_max;
             return d_prime_score;
+
         } else {
             let d_prime_score = d_score;
-            println!("D score should equal zero: {:?}", d_prime_score);
+            println!("D prime score should equal zero: {:?}", d_prime_score);
             return d_prime_score;
         }
     }
