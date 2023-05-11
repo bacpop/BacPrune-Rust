@@ -39,17 +39,29 @@ fn main() {
     println!("Minor allele frequencies were successfully calculated.");
     
     //Discard variants with MAF below cutoff
-    //Update V after discarding variants
     let cutoff = 0.01f64;
     let filtered_gt_data = maf_prune(raw_gt_data.clone(), mafs, &cutoff);
     println!("Data were successfully filtered by MAF.");
+    
+    //Update V after discarding variants
+    let n_cols = filtered_gt_data.ncols();
 
     //Generate pairwise matrix of D' values
     //This is where the calc D prime function is used
-    let d_prime_score = calculate_d_prime(filtered_gt_data, 2usize, 353usize); // fix MAF cloning issue
+    let d_prime_score = calculate_d_prime(filtered_gt_data.clone(), 2usize, 353usize); // fix MAF cloning issue
     println!("D' was calculated to be: {:?}", d_prime_score);
 
+
+    let mut d_prime_matrix = Array::zeros((n_rows, n_cols));
+    for i in 0..=n_cols {
+        for j in 0..=n_cols {
+            let d_prime_score = calculate_d_prime(filtered_gt_data.clone(), i, j);
+            let got = std::mem::replace(&mut d_prime_matrix[[i,j]], d_prime_score);
+        }
+    }
+    println!("D prime matrix: {:?}", d_prime_matrix)
     //LD Prune (return dataset minus the pruned variants)
+    
 
 }
 
