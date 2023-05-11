@@ -54,12 +54,14 @@ fn main() {
     //2. For each pair of SNPs with same MAF:
     //2. Pairwise comparison of all individuals checking that there are at least one pair of indivs that is not perfectly 0/0 or 1/1; the second you find that pair, break
     //3. Else (meaning if that pair doesn't exist), then prune out the lower MAF sample (see SNPPrune paper pg.2)
+
     for i in 0..n_cols {
         for j in 0..n_cols {
-            //sum row of the two individuals
-            //if sum =0 or 2, homo
-            //if sum =1, hetero, break
-
+            if mafs[i]=mafs[j] {
+                //sum row of the two individuals
+                //if sum =0 or 2, homo
+                //if sum =1, hetero, break
+            }
         }
     }
     println!("D prime matrix: {:?}", pruned_data)
