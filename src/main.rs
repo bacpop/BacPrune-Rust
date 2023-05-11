@@ -7,7 +7,7 @@
 use std::{error::Error, io, process, ops::Div};
 use ndarray_rand::rand_distr::num_traits::zero;
 use polars::{prelude::*, frame::row::Row};
-extern crate csv;
+//extern crate csv;
 use ndarray::prelude::*;
 use ndarray::OwnedRepr;
 
@@ -43,7 +43,7 @@ fn main() {
      let cutoff = 0.01f64;
      let filtered_gt_data = raw_gt_data.clone();
      let dummy = maf_prune(raw_gt_data, mafs, &cutoff);
-     println!("{:?}", dummy);
+     println!("Dummy is: {:?}", dummy);
 
 
     //Generate pairwise matrix of D' values
@@ -70,29 +70,16 @@ fn calc_maf(data:Array2<f64>) -> Array1<f64> {
     return calcmafs;
 }
 
-fn maf_prune(data:Array2<f64>, mafs:Array1<f64>, cutoff:&f64) -> Array1<f64> {
+fn maf_prune(data:Array2<f64>, mafs:Array1<f64>, cutoff:&f64) -> Array2<f64> {
     // Find index of each column with a MAF at or above the cutoff
-    let indicess = mafs
+    let keep_these_index = mafs
         .into_iter()
         .enumerate()
         .filter(|(_, x)| x >= cutoff)
         .map(|(index, _)| index)
         .collect::<Vec<_>>();
 
-    println!("Keep these index: {:?}", indicess);
-    let slice_index = indicess.as_slice();
-
-    // Filter the data to keep only columns where i (iterating index of newdata) is in indices (index of good mafs found prev.)
-
-    let filtered_data = data
-        .axis_iter(Axis(1))
-        .enumerate()
-        .filter(|&(i,_)| indicess.iter().any(|&x| x==i) == true ) //(iterator, value)
-        .map(|(_, e)| e);
-        //.concatenate![Axis(1), a, b];
-
-    //let filtered_data = data.slice_axis(Axis(1), keep_these_index);
-    //let filtered_data = data.slice(s![..,indicess]);
+    let filtered_data = data.select(Axis(1), &keep_these_index).to_owned();
     return filtered_data;
 }
 
