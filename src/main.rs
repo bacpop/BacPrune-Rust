@@ -57,14 +57,17 @@ fn main() {
 
     for i in 0..n_cols {
         for j in 0..n_cols {
-            if mafs[i]=mafs[j] {
+            if mafs[i] == mafs[j] {
+                let rowsums_ij = sorted_gt_data.select(Axis(1), &[i,j]).sum_axis(Axis(0));
+                println!("{:?}", rowsums_ij);
+                break;
                 //sum row of the two individuals
                 //if sum =0 or 2, homo
                 //if sum =1, hetero, break
             }
         }
     }
-    println!("D prime matrix: {:?}", pruned_data)
+    //println!("D prime matrix: {:?}", pruned_data)
 
     //If you wanted to be able to set a threshold other than just LD=1, you could run the above and then (with the reduced dataset) run everything after this:
 
