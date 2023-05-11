@@ -34,13 +34,13 @@ fn main() {
     let n_cols = raw_gt_data.ncols();
 
     //Calculate MAF
-    let mafs = calc_maf(raw_gt_data.clone()); //fix gt_data ownership issue that reqs you to clone gt_data
+    let mafs = calc_maf(&raw_gt_data);
     println!("{:?}", mafs);
     println!("Minor allele frequencies were successfully calculated.");
     
     //Discard variants with MAF below cutoff
     let cutoff = 0.01f64;
-    let filtered_gt_data = maf_prune(raw_gt_data.clone(), mafs, &cutoff);
+    let filtered_gt_data = maf_prune(&raw_gt_data, &mafs, cutoff);
     println!("Data were successfully filtered by MAF.");
     
     //Update V after discarding variants
@@ -48,14 +48,14 @@ fn main() {
 
     //Generate pairwise matrix of D' values
     //This is where the calc D prime function is used
-    let d_prime_score = calculate_d_prime(filtered_gt_data.clone(), 2usize, 353usize); // fix MAF cloning issue
+    let d_prime_score = calculate_d_prime(&filtered_gt_data, 2usize, 353usize); // fix MAF cloning issue
     println!("D' was calculated to be: {:?}", d_prime_score);
 
 
     let mut d_prime_matrix = Array::zeros((n_rows, n_cols));
-    for i in 0..=n_cols {
-        for j in 0..=n_cols {
-            let d_prime_score = calculate_d_prime(filtered_gt_data.clone(), i, j);
+    for i in 0..n_cols {
+        for j in 0..n_cols {
+            let d_prime_score = calculate_d_prime(&filtered_gt_data, i, j);
             let got = std::mem::replace(&mut d_prime_matrix[[i,j]], d_prime_score);
         }
     }
@@ -74,13 +74,13 @@ fn read_csv(path_to_file: &str) -> Array2<f64> {
     reader.deserialize_array2::<f64>((603, 1000)).expect("Failed to unwrap .csv file.")
 }
 
-fn calc_maf(data:Array2<f64>) -> Array1<f64> {
+fn calc_maf(data:&Array2<f64>) -> Array1<f64> {
     let calcmafs: ArrayBase<ndarray::OwnedRepr<f64>, Dim<[usize; 1]>> = data.sum_axis(Axis(0));
     let calcmafs: ArrayBase<ndarray::OwnedRepr<f64>, Dim<[usize; 1]>> = calcmafs.div(603f64);
     return calcmafs;
 }
 
-fn maf_prune(data:Array2<f64>, mafs:Array1<f64>, cutoff:&f64) -> Array2<f64> {
+fn maf_prune(data:&Array2<f64>, mafs:&Array1<f64>, cutoff:f64) -> Array2<f64> {
     // Find index of each column with a MAF at or above the cutoff
     let keep_these_index = mafs
         .into_iter()
@@ -89,24 +89,24 @@ fn maf_prune(data:Array2<f64>, mafs:Array1<f64>, cutoff:&f64) -> Array2<f64> {
         .map(|(index, _)| index)
         .collect::<Vec<_>>();
 
-    let filtered_data = data.select(Axis(1), &keep_these_index).to_owned();
+    let filtered_data = data.select(Axis(1), &keep_these_index);
     return filtered_data;
 }
 
-fn calculate_d_prime(data: ArrayBase<OwnedRepr<f64>, Dim<[usize; 2]>>, varianta:usize, variantb:usize) -> f64 {
+fn calculate_d_prime(data: &ArrayBase<OwnedRepr<f64>, Dim<[usize; 2]>>, varianta:usize, variantb:usize) -> f64 {
     //Calculate the allele frequencies
-    let allele_frequencies: ArrayBase<ndarray::OwnedRepr<f64>, Dim<[usize; 2]>> = find_allele_frequencies(data.clone());
+    let allele_frequencies: ArrayBase<ndarray::OwnedRepr<f64>, Dim<[usize; 2]>> = find_allele_frequencies(&data);
 
     //Calculate haplotype frequencies for  given pair of variants
-    let haplotype_frequencies = find_haplotype_frequencies(data, varianta, variantb);
+    let haplotype_frequencies = find_haplotype_frequencies(&data, varianta, variantb);
 
     //Calculate D prime score for a given pair of variants
-    let d_prime = calc_d_prime(allele_frequencies, haplotype_frequencies, varianta, variantb);
+    let d_prime = calc_d_prime(&allele_frequencies, &haplotype_frequencies, varianta, variantb);
     return d_prime;
 
     // FUNCTION DEFINITIONS
     
-    fn find_allele_frequencies(data:Array2<f64>) -> Array2<f64> {
+    fn find_allele_frequencies(data:&Array2<f64>) -> Array2<f64> {
         let allele_frequencies1 = data.t().sum_axis(Axis(1)); //col sums
         let allele_frequencies0 = 603f64 - allele_frequencies1.clone();
         let allele_frequencies: ArrayBase<ndarray::OwnedRepr<f64>, Dim<[usize; 2]>> = ndarray::stack![Axis(0), allele_frequencies0, allele_frequencies1];
@@ -114,7 +114,7 @@ fn calculate_d_prime(data: ArrayBase<OwnedRepr<f64>, Dim<[usize; 2]>>, varianta:
         return allele_frequencies; //allele_freqs0 in first row, allele_freqs1 in second row
     }
     
-    fn find_haplotype_frequencies(data:Array2<f64>, varianta:usize, variantb:usize) -> Array1<f64> { // variantA/variantB is the index number of the variant
+    fn find_haplotype_frequencies(data:&Array2<f64>, varianta:usize, variantb:usize) -> Array1<f64> { // variantA/variantB is the index number of the variant
         // Create array (ab) containing just variant A and variant B from the dataset
         // To make this more efficient, could take values directly from the dataset for next steps
         // instead of creating new array
@@ -142,7 +142,7 @@ fn calculate_d_prime(data: ArrayBase<OwnedRepr<f64>, Dim<[usize; 2]>>, varianta:
     }
 
     //Calculate D prime score for a given pair of variants
-    fn calc_d_prime(allele_freqs:Array2<f64>, haplotype_freqs:Array1<f64>, varianta:usize, variantb:usize) -> f64 {
+    fn calc_d_prime(allele_freqs:&Array2<f64>, haplotype_freqs:&Array1<f64>, varianta:usize, variantb:usize) -> f64 {
         
         //Caclulate D score for given pair of variants
         // D = f(00)*f(11)-f(10)*f(01)
