@@ -35,23 +35,32 @@ fn main() {
 
     //Calculate MAF
     let mafs = calc_maf(&raw_gt_data);
-    println!("{:?}", mafs);
     println!("Minor allele frequencies were successfully calculated.");
     
     //Discard variants with MAF below cutoff
     let cutoff = 0.01f64;
-    let filtered_gt_data = maf_prune(&raw_gt_data, &mafs, cutoff);
+    let filtered_gt_data = maf_prune(&raw_gt_data, &mafs, &cutoff);
     println!("Data were successfully filtered by MAF.");
     
     //Update V after discarding variants
     let n_cols = filtered_gt_data.ncols();
 
+    // If you wanted to ONLY prune out those with LD=1, you could do it with just the following steps:
+    //1. Sort by MAF
+    let sorted_gt_data = sort_by_maf(&mafs);
+
+    //let sorted_gt_data = filtered_gt_data.sort_by_key();
+
+    //2. Pairwise comparison of all variants checking that there are at least one pair of samples that is not perfectly 0/0 or 1/1; the second you find that pair, break
+    //3. Else (meaning if that pair doesn't exist), then prune out the lower MAF sample (see SNPPrune paper pg.2)
+
+
+    //If you wanted to be able to set a threshold other than just LD=1, you could run the above and then (with the reduced dataset) run this:
+
+    //Next: make it so you do not compare samples with very different MAFs
+    //Maybe by sorting by MAF and only iterating over varBs that are within a certain range of varA
+
     //Generate pairwise matrix of D' values
-    //This is where the calc D prime function is used
-    let d_prime_score = calculate_d_prime(&filtered_gt_data, 2usize, 353usize); // fix MAF cloning issue
-    println!("D' was calculated to be: {:?}", d_prime_score);
-
-
     let mut d_prime_matrix = Array::zeros((n_rows, n_cols));
     for i in 0..n_cols {
         for j in 0..n_cols {
@@ -60,6 +69,7 @@ fn main() {
         }
     }
     println!("D prime matrix: {:?}", d_prime_matrix)
+    
     //LD Prune (return dataset minus the pruned variants)
     
 
@@ -80,17 +90,40 @@ fn calc_maf(data:&Array2<f64>) -> Array1<f64> {
     return calcmafs;
 }
 
-fn maf_prune(data:&Array2<f64>, mafs:&Array1<f64>, cutoff:f64) -> Array2<f64> {
+fn maf_prune(data:&Array2<f64>, mafs:&Array1<f64>, cutoff:&f64) -> Array2<f64> {
     // Find index of each column with a MAF at or above the cutoff
     let keep_these_index = mafs
         .into_iter()
         .enumerate()
-        .filter(|(_, x)| x >= cutoff)
+        .filter(|(_, x)| x >= &cutoff)
         .map(|(index, _)| index)
         .collect::<Vec<_>>();
 
     let filtered_data = data.select(Axis(1), &keep_these_index);
     return filtered_data;
+}
+
+fn sort_by_maf(mafs:&Array1<f64>) -> Vec<usize> {
+    
+    let sorted_mafs_index = sort(mafs);
+    println!("{:?}", sorted_mafs_index);
+
+    return sorted_mafs_index;
+
+    fn sort(arr: &Array1<f64>) -> Vec<usize> {
+        let mut out = (0..arr.len()).collect::<Vec<usize>>();
+        out.sort_by(|&a_idx, &b_idx| {
+            let a = arr[a_idx];
+            let b = arr[b_idx];
+            match (a.is_nan(), b.is_nan()) {
+                (true, true) => Ordering::Equal,
+                (true, false) => Ordering::Greater,
+                (false, true) => Ordering::Less,
+                (false, false) => a.partial_cmp(&b).unwrap(),
+            }
+        });
+        out
+    }
 }
 
 fn calculate_d_prime(data: &ArrayBase<OwnedRepr<f64>, Dim<[usize; 2]>>, varianta:usize, variantb:usize) -> f64 {
@@ -152,7 +185,7 @@ fn calculate_d_prime(data: &ArrayBase<OwnedRepr<f64>, Dim<[usize; 2]>>, varianta
             //Get D max set: -f(A)f(B) and -f(a)f(b)
             let d_max_set:Vec<f64> = vec![-1f64*(allele_freqs[[0,varianta]])*(allele_freqs[[0, variantb]]), -1f64*(allele_freqs[[1, varianta]])*(allele_freqs[[1, variantb]])];
             //Get Dmax value (max of D max set)
-            let d_max = d_max_set.iter().max_by(|a,b| a.total_cmp(b)).expect("Ooops");
+            let d_max = d_max_set.iter().max_by(|a,b| a.total_cmp(b)).expect("Oops");
             //Calculate D prime score
             let d_prime_score = d_score/d_max;
             return d_prime_score;
@@ -161,7 +194,7 @@ fn calculate_d_prime(data: &ArrayBase<OwnedRepr<f64>, Dim<[usize; 2]>>, varianta
             //Get D max set: f(A)f(b) and f(a)f(B)
             let d_max_set:Vec<f64> = vec![(allele_freqs[[0,varianta]])*(allele_freqs[[1, variantb]]), (allele_freqs[[1, varianta]])*(allele_freqs[[0, variantb]])];
             //Get Dmax value (min of D max set)
-            let d_max = d_max_set.iter().min_by(|a,b| a.total_cmp(b)).expect("Ooops");
+            let d_max = d_max_set.iter().min_by(|a,b| a.total_cmp(b)).expect("Oops");
             //Calculate D prime score
             let d_prime_score = d_score/d_max;
             return d_prime_score;
