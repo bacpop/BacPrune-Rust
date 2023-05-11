@@ -57,13 +57,23 @@ fn main() {
 
     for i in 0..n_cols {
         for j in 0..n_cols {
-            if mafs[i] == mafs[j] {
-                let rowsums_ij = sorted_gt_data.select(Axis(1), &[i,j]).sum_axis(Axis(0));
-                println!("{:?}", rowsums_ij);
-                break;
-                //sum row of the two individuals
-                //if sum =0 or 2, homo
-                //if sum =1, hetero, break
+            if mafs[i] == mafs[j] { //inside this loop is one snp vs one snp
+                //sum row of the two SNPs
+                let rowsums_ij = sorted_gt_data.select(Axis(1), &[i,j]).sum_axis(Axis(1));
+                println!("New line: {:?}", rowsums_ij);
+
+                for y in 0..n_rows {
+                    //if any rowsums are equal to 1, then the SNP pair is not in perfect LD (so break)
+                    //if no rowsums are 1 (meaning all rowsums are 0 or 2, aka all pairs of individuals are 00 or 11),
+                    //then prune one of the snps
+                    if rowsums_ij.contains(1) == TRUE {
+                        println!("Break");
+                        break;
+                    } else {
+                    //prune
+                    println!("Prune here");
+                    }
+                }
             }
         }
     }
