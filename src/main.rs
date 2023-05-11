@@ -45,30 +45,31 @@ fn main() {
     //Update V after discarding variants
     let n_cols = filtered_gt_data.ncols();
 
+    //Update MAF list after discarding variants
+    let mafs = calc_maf(&filtered_gt_data);
+
     // If you wanted to ONLY prune out those with LD=1, you could do it with just the following steps:
     //1. Sort by MAF
-    let sorted_gt_data = sort_by_maf(&mafs);
-
-    //let sorted_gt_data = filtered_gt_data.sort_by_key();
-
-    //2. Pairwise comparison of all variants checking that there are at least one pair of samples that is not perfectly 0/0 or 1/1; the second you find that pair, break
+    let sorted_gt_data = sort_by_maf(&mafs, &filtered_gt_data);
+    //2. For each pair of SNPs with same MAF:
+    //2. Pairwise comparison of all individuals checking that there are at least one pair of indivs that is not perfectly 0/0 or 1/1; the second you find that pair, break
     //3. Else (meaning if that pair doesn't exist), then prune out the lower MAF sample (see SNPPrune paper pg.2)
 
 
-    //If you wanted to be able to set a threshold other than just LD=1, you could run the above and then (with the reduced dataset) run this:
+    //If you wanted to be able to set a threshold other than just LD=1, you could run the above and then (with the reduced dataset) run everything after this:
 
     //Next: make it so you do not compare samples with very different MAFs
     //Maybe by sorting by MAF and only iterating over varBs that are within a certain range of varA
 
     //Generate pairwise matrix of D' values
-    let mut d_prime_matrix = Array::zeros((n_rows, n_cols));
-    for i in 0..n_cols {
-        for j in 0..n_cols {
-            let d_prime_score = calculate_d_prime(&filtered_gt_data, i, j);
-            let got = std::mem::replace(&mut d_prime_matrix[[i,j]], d_prime_score);
-        }
-    }
-    println!("D prime matrix: {:?}", d_prime_matrix)
+    //let mut d_prime_matrix = Array::zeros((n_cols, n_cols));
+    //for i in 0..n_cols {
+    //    for j in 0..n_cols {
+    //        let d_prime_score = calculate_d_prime(&filtered_gt_data, i, j);
+    //        let got = std::mem::replace(&mut d_prime_matrix[[i,j]], d_prime_score);
+    //    }
+    //}
+    //println!("D prime matrix: {:?}", d_prime_matrix)
     
     //LD Prune (return dataset minus the pruned variants)
     
@@ -103,13 +104,14 @@ fn maf_prune(data:&Array2<f64>, mafs:&Array1<f64>, cutoff:&f64) -> Array2<f64> {
     return filtered_data;
 }
 
-fn sort_by_maf(mafs:&Array1<f64>) -> Vec<usize> {
-    
+fn sort_by_maf(mafs:&Array1<f64>, data:&Array2<f64>) -> Array2<f64> {
+    //Find index of sorted mafs
     let sorted_mafs_index = sort(mafs);
-    println!("{:?}", sorted_mafs_index);
+    //Sort data columns by index
+    let sorted_data = data.select(Axis(1), sorted_mafs_index.as_slice());
+    return sorted_data;
 
-    return sorted_mafs_index;
-
+    // Define function used to sort MAF vector and find its index
     fn sort(arr: &Array1<f64>) -> Vec<usize> {
         let mut out = (0..arr.len()).collect::<Vec<usize>>();
         out.sort_by(|&a_idx, &b_idx| {
