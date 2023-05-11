@@ -55,29 +55,51 @@ fn main() {
     //2. Pairwise comparison of all individuals checking that there are at least one pair of indivs that is not perfectly 0/0 or 1/1; the second you find that pair, break
     //3. Else (meaning if that pair doesn't exist), then prune out the lower MAF sample (see SNPPrune paper pg.2)
 
+
     for i in 0..n_cols {
         for j in 0..n_cols {
-            if mafs[i] == mafs[j] { //inside this loop is one snp vs one snp
+            //when i = j (are the same variant) in the for loops, the snp will prune itself out
+            // hence why needed to add the && i!=j condition
+            if mafs[i] == mafs[j] && i != j { //inside this loop is one snp vs one snp
                 //sum row of the two SNPs
                 let rowsums_ij = sorted_gt_data.select(Axis(1), &[i,j]).sum_axis(Axis(1));
-                println!("New line: {:?}", rowsums_ij);
-
-                for y in 0..n_rows {
-                    //if any rowsums are equal to 1, then the SNP pair is not in perfect LD (so break)
-                    //if no rowsums are 1 (meaning all rowsums are 0 or 2, aka all pairs of individuals are 00 or 11),
-                    //then prune one of the snps
-                    if rowsums_ij.contains(1) == TRUE {
-                        println!("Break");
-                        break;
-                    } else {
+                //if any rowsums are equal to 1, then the SNP pair is not in perfect LD (so break)
+                //if no rowsums are 1 (meaning all rowsums are 0 or 2, aka all pairs of individuals are 00 or 11),
+                //then prune one of the snps
+                if rowsums_ij.iter().any(|&i| i==1.0) == true {
+                    println!("Break");
+                    break;
+                } else {
                     //prune
-                    println!("Prune here");
-                    }
+                    //remove i - if I prune here, will that mess up the rest of the loops (missing some pairwise comparisons?)
+                    //implement check: check that if you run it again, none have ld=1
+                    let sorted_gt_data = sorted_gt_data.select(Axis(1), &[..i,i..]);
                 }
             }
         }
     }
     //println!("D prime matrix: {:?}", pruned_data)
+
+    //check
+    for i in 0..n_cols {
+        for j in 0..n_cols {
+            if mafs[i] == mafs[j] { //inside this loop is one snp vs one snp
+                //sum row of the two SNPs
+                let rowsums_ij = sorted_gt_data.select(Axis(1), &[i,j]).sum_axis(Axis(1));
+                //if any rowsums are equal to 1, then the SNP pair is not in perfect LD (so break)
+                //if no rowsums are 1 (meaning all rowsums are 0 or 2, aka all pairs of individuals are 00 or 11),
+                //then prune one of the snps
+                if rowsums_ij.iter().any(|&i| i==1.0) == true {
+                    println!("Break");
+                    break;
+                } else {
+                    //implement check: check that if you run it again, none have ld=1
+                    println!("It messed up filtering!");
+                    //This check does not ensure the code is correct but might catch the error if it's wrong
+                }
+            }
+        }
+    }
 
     //If you wanted to be able to set a threshold other than just LD=1, you could run the above and then (with the reduced dataset) run everything after this:
 
