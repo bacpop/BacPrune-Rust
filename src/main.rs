@@ -75,8 +75,8 @@ fn main() {
                     //if I prune here, will that mess up the rest of the loops (missing some pairwise comparisons?)
                     //implement check: check that if you run it again, none have ld=1
                     //[!i]
-                    let keep_index = [0..sorted_gt_data.ncols()].select(&[!i]);
-                    let sorted_gt_data = sorted_gt_data.select(Axis(1), keep_index); //!i throws error because it gives all possible numbers except i
+                    let keep_index = vec![0..sorted_gt_data.ncols()].remove(i).collect::<Vec<usize>>();
+                    let sorted_gt_data = sorted_gt_data.select(Axis(1), &keep_index);
                     println!("Finish prune");
                 }
             }
