@@ -83,12 +83,14 @@ fn main() {
                 } else {
                     //prune
                     println!("Try to add to skip index");
-                    let skip_index = skip_index.insert(i);
+                    skip_index.insert(i);
                     println!("Skip index: {:?}", skip_index);
                 }
             }
         }
     }
+    
+
     //println!("D prime matrix: {:?}", pruned_data)
 
     //implement check for above here!
