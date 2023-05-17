@@ -20,6 +20,8 @@ use ndarray::Zip;
 
 use std::cmp::Ordering;
 
+use std::collections::HashSet;
+
 
 fn main() {
     println!("Welcome to the LD Pruning Module.");
@@ -57,15 +59,18 @@ fn main() {
     //2. Pairwise comparison of all individuals checking that there are at least one pair of indivs that is not perfectly 0/0 or 1/1; the second you find that pair, break
     //3. Else (meaning if that pair doesn't exist), then prune out the lower MAF sample (see SNPPrune paper pg.2)
 
+    //Create skip index (using HashSet package for a set)
+    let mut skip_index: HashSet<usize> = HashSet::new();
+    //When a variant is pruned, its index number is added to this set
+    //Before trying to compare two variants, the loop first checks that neither is in the index
+    //This means that variants that have already been pruned will be skipped over during furture iterations,
+    //without causing any indexing issues
+    //The skip index also acts as the record of which variants should be pruned out of the dataset
 
     for i in 0..n_cols {
         for j in i..n_cols {
             //when i = j (are the same variant) in the for loops, the snp will prune itself out
             // hence why needed to add the && i!=j condition
-
-            //maybe as a happy medium, could iterate to create vector of index and then only remove in the inner j loop
-            //could still be "semi prune as you go" but maybe avoid some of the indexing issues?
-
             if mafs[i] == mafs[j] && i != j { //inside this loop is one snp vs one snp
                 //sum row of the two SNPs
                 let rowsums_ij = sorted_gt_data.select(Axis(1), &[i,j]).sum_axis(Axis(1));
@@ -77,17 +82,9 @@ fn main() {
                     break;
                 } else {
                     //prune
-                    println!("Try prune");
-                    // just try to make index here. select afterwards...
-                    // but that would create way more work since not pruning 'as you go'
-                    let keep = sorted_gt_data.axis_iter(Axis(1)).enumerate().retain(|(x, _)| x != i).map(|(index, _)| index).collect::<Vec<_>>();
-
-                    //if I prune here, will that mess up the rest of the loops (missing some pairwise comparisons?)
-                    //implement check: check that if you run it again, none have ld=1
-                    let keep_index = vec![0..sorted_gt_data.ncols()].remove(i).collect::<Vec<usize>>();
-                    //let keep_index = vec![0..sorted_gt_data.ncols()].iter().filter(|x| x == j).collect::<Vec<usize>>();
-                    //let sorted_gt_data = sorted_gt_data.select(Axis(1), &keep_index);
-                    println!("Finish prune");
+                    println!("Try to add to skip index");
+                    let skip_index = skip_index.insert(i);
+                    println!("Skip index: {:?}", skip_index);
                 }
             }
         }
