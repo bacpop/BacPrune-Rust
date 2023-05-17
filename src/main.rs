@@ -71,7 +71,7 @@ fn main() {
         for j in i..n_cols {
             //when i = j (are the same variant) in the for loops, the snp will prune itself out
             // hence why needed to add the && i!=j condition
-            if mafs[i] == mafs[j] && i != j { //inside this loop is one snp vs one snp
+            if mafs[i] == mafs[j] && i != j && !skip_index.contains(&i) && !skip_index.contains(&j) { //inside this loop is one snp vs one snp
                 //sum row of the two SNPs
                 let rowsums_ij = sorted_gt_data.select(Axis(1), &[i,j]).sum_axis(Axis(1));
                 //if any rowsums are equal to 1, then the SNP pair is not in perfect LD (so break)
@@ -95,10 +95,10 @@ fn main() {
     let skip_index: Vec<_> = skip_index.into_iter().collect();
     let keep_index: Vec<usize> = (0..n_cols).collect::<Vec<_>>().into_iter().filter(|x| skip_index.contains(x) == true).collect::<Vec<usize>>();
 
-    //prune the LD=1 variants out!
+    //LD PRUNE PHASE 1
+    // Prune the LD=1 variants out!
     let ldbelow1_gt_data = sorted_gt_data.select(Axis(1), keep_index.as_slice());
     println!("{:?}", ldbelow1_gt_data);
-
 
    //If user wants to prune for LD=1 cases, program ends here.
    //If user wants to prune for LD<1 cases, continue:
@@ -107,18 +107,27 @@ fn main() {
     //Next: make it so you do not compare samples with very different MAFs
     //Maybe by sorting by MAF and only iterating over varBs that are within a certain range of varA
 
-    //Generate pairwise matrix of D' values
-    let mut d_prime_matrix = Array::zeros((n_cols, n_cols));
+    //Make another skip/prune index
+    let mut prune_index: HashSet<usize> = HashSet::new();
+    //Set LD threshold
+    let ld_threshold = 0.98f64;
+
     for i in 0..n_cols {
-        for j in 0..n_cols {
-            let d_prime_score = calculate_d_prime(&filtered_gt_data, i, j);
-            let got = std::mem::replace(&mut d_prime_matrix[[i,j]], d_prime_score);
+        for j in i..n_cols {
+            if !prune_index.contains(&i) && !prune_index.contains(&j) {
+                let d_prime_score = calculate_d_prime(&filtered_gt_data, i, j);
+                if d_prime_score >= ld_threshold {
+                    prune_index.insert(i);
+                }
+            }
         }
     }
-    //println!("D prime matrix: {:?}", d_prime_matrix)
+    println!("Prune index: {:?}", prune_index);
     
-    //LD Prune (return dataset minus the pruned variants)
+    //LD PRUNE PHASE 2
+    // Prune the LD>=threshold variants out!
     
+
 
 }
 
