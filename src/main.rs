@@ -15,6 +15,8 @@ use csv::ReaderBuilder;
 use ndarray::Array2;
 use std::fs::File;
 use ndarray_csv::Array2Reader;
+use ndarray::Zip;
+
 
 use std::cmp::Ordering;
 
@@ -57,9 +59,13 @@ fn main() {
 
 
     for i in 0..n_cols {
-        for j in 0..n_cols {
+        for j in i..n_cols {
             //when i = j (are the same variant) in the for loops, the snp will prune itself out
             // hence why needed to add the && i!=j condition
+
+            //maybe as a happy medium, could iterate to create vector of index and then only remove in the inner j loop
+            //could still be "semi prune as you go" but maybe avoid some of the indexing issues?
+
             if mafs[i] == mafs[j] && i != j { //inside this loop is one snp vs one snp
                 //sum row of the two SNPs
                 let rowsums_ij = sorted_gt_data.select(Axis(1), &[i,j]).sum_axis(Axis(1));
@@ -72,11 +78,15 @@ fn main() {
                 } else {
                     //prune
                     println!("Try prune");
+                    // just try to make index here. select afterwards...
+                    // but that would create way more work since not pruning 'as you go'
+                    let keep = sorted_gt_data.axis_iter(Axis(1)).enumerate().retain(|(x, _)| x != i).map(|(index, _)| index).collect::<Vec<_>>();
+
                     //if I prune here, will that mess up the rest of the loops (missing some pairwise comparisons?)
                     //implement check: check that if you run it again, none have ld=1
-                    //[!i]
                     let keep_index = vec![0..sorted_gt_data.ncols()].remove(i).collect::<Vec<usize>>();
-                    let sorted_gt_data = sorted_gt_data.select(Axis(1), &keep_index);
+                    //let keep_index = vec![0..sorted_gt_data.ncols()].iter().filter(|x| x == j).collect::<Vec<usize>>();
+                    //let sorted_gt_data = sorted_gt_data.select(Axis(1), &keep_index);
                     println!("Finish prune");
                 }
             }
@@ -175,7 +185,7 @@ fn calculate_d_prime(data: &ArrayBase<OwnedRepr<f64>, Dim<[usize; 2]>>, varianta
     
     fn find_allele_frequencies(data:&Array2<f64>) -> Array2<f64> {
         let allele_frequencies1 = data.t().sum_axis(Axis(1)); //col sums
-        let allele_frequencies0 = 603f64 - allele_frequencies1.clone();
+        let allele_frequencies0 = 603f64 - &allele_frequencies1;
         let allele_frequencies: ArrayBase<ndarray::OwnedRepr<f64>, Dim<[usize; 2]>> = ndarray::stack![Axis(0), allele_frequencies0, allele_frequencies1];
         let allele_frequencies: ArrayBase<ndarray::OwnedRepr<f64>, Dim<[usize; 2]>> = allele_frequencies.div(603f64);
         return allele_frequencies; //allele_freqs0 in first row, allele_freqs1 in second row
