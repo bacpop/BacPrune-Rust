@@ -90,26 +90,31 @@ fn main() {
         }
     }
     
+    //turn skip index into keep index (so can use in pruning .select() function)
+    //there is probably a better way to do this but this is quick and dirty
+    let skip_index: Vec<_> = skip_index.into_iter().collect();
+    let keep_index: Vec<usize> = (0..n_cols).collect::<Vec<_>>().into_iter().filter(|x| skip_index.contains(x) == true).collect::<Vec<usize>>();
 
-    //println!("D prime matrix: {:?}", pruned_data)
+    //prune the LD=1 variants out!
+    let ldbelow1_gt_data = sorted_gt_data.select(Axis(1), keep_index.as_slice());
+    println!("{:?}", ldbelow1_gt_data);
 
-    //implement check for above here!
 
-
-
-    //If you wanted to be able to set a threshold other than just LD=1, you could run the above and then (with the reduced dataset) run everything after this:
+   //If user wants to prune for LD=1 cases, program ends here.
+   //If user wants to prune for LD<1 cases, continue:
+   //(with the reduced dataset) run everything after this:
 
     //Next: make it so you do not compare samples with very different MAFs
     //Maybe by sorting by MAF and only iterating over varBs that are within a certain range of varA
 
     //Generate pairwise matrix of D' values
-    //let mut d_prime_matrix = Array::zeros((n_cols, n_cols));
-    //for i in 0..n_cols {
-    //    for j in 0..n_cols {
-    //        let d_prime_score = calculate_d_prime(&filtered_gt_data, i, j);
-    //        let got = std::mem::replace(&mut d_prime_matrix[[i,j]], d_prime_score);
-    //    }
-    //}
+    let mut d_prime_matrix = Array::zeros((n_cols, n_cols));
+    for i in 0..n_cols {
+        for j in 0..n_cols {
+            let d_prime_score = calculate_d_prime(&filtered_gt_data, i, j);
+            let got = std::mem::replace(&mut d_prime_matrix[[i,j]], d_prime_score);
+        }
+    }
     //println!("D prime matrix: {:?}", d_prime_matrix)
     
     //LD Prune (return dataset minus the pruned variants)
