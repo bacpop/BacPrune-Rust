@@ -91,14 +91,13 @@ fn main() {
     //there is probably a better way to do this but this is quick and dirty
     let skip_index: Vec<_> = skip_index.into_iter().collect();
     let keep_index: Vec<usize> = (0..(sorted_gt_data.ncols()-1)).collect::<Vec<_>>().into_iter().filter(|x| skip_index.contains(x) == false).collect::<Vec<usize>>();
-    println!("Keep index: {:?}", keep_index);
 
     //LD PRUNE PHASE 1
     // Prune the LD=1 variants out!
     let ldbelow1_gt_data = sorted_gt_data.select(Axis(1), keep_index.as_slice());
-    println!("{:?}", ldbelow1_gt_data);
 
    //If user wants to prune for LD=1 cases, program ends here.
+   //(Note that the program doesn't prune ALL LD=1 cases, just some)
    //If user wants to prune for LD<1 cases, continue:
    //(with the reduced dataset) run everything after this:
 
@@ -108,7 +107,7 @@ fn main() {
     //Make another skip/prune index
     let mut prune_index: HashSet<usize> = HashSet::new();
     //Set LD threshold
-    let ld_threshold = 0.9999999f64;
+    let ld_threshold = 0.99f64;
 
     for i in 0..ldbelow1_gt_data.ncols() {
         for j in i..ldbelow1_gt_data.ncols() {
@@ -136,6 +135,7 @@ fn main() {
 
     //is it pruning out every single variant? (instead of leaving one)
     //no, it's that the d prime scores are 1 for every variant
+    //but maybe it's also pruning out all variants instead of leaving one?
 
 }
 
