@@ -103,6 +103,9 @@ fn main() -> Result<(), csv::Error> {
     //Next: make it so you do not compare samples with very different MAFs
     //Maybe by sorting by MAF and only iterating over varBs that are within a certain range of varA
 
+    //Update MAF list after discarding variants
+    let mafs = calc_maf(&ldbelow1_gt_data);
+
     //Make another skip/prune index
     let mut prune_index: HashSet<usize> = HashSet::new();
     //Set LD threshold
@@ -110,13 +113,18 @@ fn main() -> Result<(), csv::Error> {
 
     for i in 0..ldbelow1_gt_data.ncols() {
         for j in i..ldbelow1_gt_data.ncols() {
-            if i != j && !prune_index.contains(&i) && !prune_index.contains(&j) {
+            //add if loop here with SNPrune calculation of how close mafs have to be to run rest
+            //quick and dirty method here: if (mafs[i] - mafs[j]).abs() <= 0.05 
+            if i != j && !prune_index.contains(&i) && !prune_index.contains(&j) && (mafs[i] - mafs[j]).abs() <= 0.05 {
+                //here you have to calculate the AFs, haplotypes freqs, etc. for the d_prime_score function
+                //would be more efficient to calculate these once, and reference that matrix
                 let d_prime_score = calculate_d_prime(&ldbelow1_gt_data, i, j);
                 if d_prime_score >= ld_threshold {
                     prune_index.insert(i);
                 }
             }
         }
+        println!("{:?} of 198248 variants has been completed.", i);
     }
 
     //turn skip index into keep index (so can use in pruning .select() function)
@@ -136,27 +144,8 @@ fn main() -> Result<(), csv::Error> {
     // could maybe use .skip(1) to skip the first row throughout the program?
     //full_prune_gt_data.records();
     
-    //let headers = full_prune_gt_data.headers()?;
-
-    //let output_path = "rust_results.csv";
-
     let string_arr = full_prune_gt_data.map(|e| e.to_string());
     println!("String array: {:?}", string_arr);
-
-    //let mut file = Writer::from_path(output_path)?;
-    
-    //for i in 0..full_prune_gt_data.nrows() {
-    //    file.write_record(&string_arr[[i,..]]);
-    //}
-
-    //let nrows = &full_prune_gt_data.nrows();
-    //let ncols = &full_prune_gt_data.ncols();
-
-
-    //let file = File::create("rust_results.csv")?;
-    //let mut writer = WriterBuilder::new().has_headers(false).from_writer(file);
-    //writer.serialize_array2(&full_prune_gt_data)?;
-
 
     let file = OpenOptions::new()
         .write(true)
