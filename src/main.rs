@@ -16,23 +16,27 @@ use std::fs::File;
 use ndarray_csv::Array2Reader;
 use ndarray::Zip;
 
+use ndarray_csv::Array2Writer;
 
 use std::cmp::Ordering;
+use std::fs::OpenOptions;
 
 //use serde::Serialize;
 
 use std::collections::HashSet;
 use csv::Writer;
+use csv::WriterBuilder;
 
+ 
 fn main() -> Result<(), csv::Error> {
     println!("Welcome to the LD Pruning Module.");
 
     //to read in data, need to know the number of rows and columns in your data
     let n_rows = 603;
-    let n_cols = 198248; //including header
+    let n_cols = 1000; //including header
 
     // Read in data
-    let raw_gt_data = read_csv("pyseer_complete.csv", n_rows, n_cols);
+    let raw_gt_data = read_csv("3000_gts.csv", n_rows, n_cols);
     println!("{:?}", raw_gt_data);
     println!("Your data has been successfully read in. Sit tight while we run your analysis.");
 
@@ -95,6 +99,7 @@ fn main() -> Result<(), csv::Error> {
     //LD PRUNE PHASE 1
     // Prune the LD=1 variants out!
     let ldbelow1_gt_data = sorted_gt_data.select(Axis(1), keep_index.as_slice());
+    println!("LD pruning phase 1 has been completed.");
 
    //If user wants to prune for LD=1 cases, program ends here.
    //(Note that the program doesn't prune ALL LD=1 cases, just some)
@@ -113,25 +118,22 @@ fn main() -> Result<(), csv::Error> {
         for j in i..ldbelow1_gt_data.ncols() {
             if i != j && !prune_index.contains(&i) && !prune_index.contains(&j) {
                 let d_prime_score = calculate_d_prime(&ldbelow1_gt_data, i, j);
-                println!("{:?}", d_prime_score);
                 if d_prime_score >= ld_threshold {
                     prune_index.insert(i);
                 }
             }
         }
     }
-    println!("Prune index: {:?}", prune_index);
-    
+
     //turn skip index into keep index (so can use in pruning .select() function)
     //there is probably a better way to do this but this is quick and dirty
     let prune_index: Vec<_> = prune_index.into_iter().collect();
     let keep_prune_index: Vec<usize> = (0..(ldbelow1_gt_data.ncols()-1)).collect::<Vec<_>>().into_iter().filter(|x| prune_index.contains(x) == false).collect::<Vec<usize>>();
-    println!("Keep prune index: {:?}", keep_prune_index);
 
     //LD PRUNE PHASE 2
     // Prune the LD>=threshold variants out!
     let full_prune_gt_data = ldbelow1_gt_data.select(Axis(1), &keep_prune_index.as_slice());
-    println!("{:?}", full_prune_gt_data);
+    println!("LD pruning phase 2 has been completed.");
 
     //I think it's pruning out every single variant? (instead of leaving one)
 
@@ -142,11 +144,46 @@ fn main() -> Result<(), csv::Error> {
     
     //let headers = full_prune_gt_data.headers()?;
 
-    let output_path = "~/Desktop/rustresults";
+    //let output_path = "rust_results.csv";
 
     let string_arr = full_prune_gt_data.map(|e| e.to_string());
-    let mut file = Writer::from_path(output_path)?;
-    file.write_record(string_arr)
+    println!("String array: {:?}", string_arr);
+
+    //let mut file = Writer::from_path(output_path)?;
+    
+    //for i in 0..full_prune_gt_data.nrows() {
+    //    file.write_record(&string_arr[[i,..]]);
+    //}
+
+    //let nrows = &full_prune_gt_data.nrows();
+    //let ncols = &full_prune_gt_data.ncols();
+
+
+    //let file = File::create("rust_results.csv")?;
+    //let mut writer = WriterBuilder::new().has_headers(false).from_writer(file);
+    //writer.serialize_array2(&full_prune_gt_data)?;
+
+
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .append(true)
+        .open("test.csv")
+        .unwrap();
+    let mut wtr = csv::Writer::from_writer(file);
+
+    wtr.write_record(&["City", "State", "Population", "Latitude", "Longitude"])?;
+    wtr.write_record(&["Davidsons Landing", "AK", "", "65.2419444", "-165.2716667"])?;
+    wtr.write_record(&["Kenai", "AK", "7610", "60.5544444", "-151.2583333"])?;
+    wtr.write_record(&["Oakman", "AL", "", "33.7133333", "-87.3886111"])?;
+
+    for i in 0..full_prune_gt_data.nrows() {
+        wtr.write_record(&string_arr.slice(s![i, ..]));
+    }
+
+    wtr.flush()?;
+    
+    Ok(())
 
 }
 
