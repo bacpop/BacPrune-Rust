@@ -168,7 +168,7 @@ fn main() -> Result<(), csv::Error> {
         .write(true)
         .create(true)
         .append(true)
-        .open("test.csv")
+        .open("bacprune_rust_results.csv")
         .unwrap();
     let mut wtr = csv::Writer::from_writer(file);
 
