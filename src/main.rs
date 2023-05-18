@@ -78,13 +78,10 @@ fn main() {
                 //if no rowsums are 1 (meaning all rowsums are 0 or 2, aka all pairs of individuals are 00 or 11),
                 //then prune one of the snps
                 if rowsums_ij.iter().any(|&i| i==1.0) == true {
-                    println!("Break");
                     break;
                 } else {
-                    //prune
-                    println!("Try to add to skip index");
+                    //add to skip index (to be pruned)
                     skip_index.insert(i);
-                    println!("Skip index: {:?}", skip_index);
                 }
             }
         }
@@ -93,7 +90,8 @@ fn main() {
     //turn skip index into keep index (so can use in pruning .select() function)
     //there is probably a better way to do this but this is quick and dirty
     let skip_index: Vec<_> = skip_index.into_iter().collect();
-    let keep_index: Vec<usize> = (0..n_cols).collect::<Vec<_>>().into_iter().filter(|x| skip_index.contains(x) == true).collect::<Vec<usize>>();
+    let keep_index: Vec<usize> = (0..(sorted_gt_data.ncols()-1)).collect::<Vec<_>>().into_iter().filter(|x| skip_index.contains(x) == false).collect::<Vec<usize>>();
+    println!("Keep index: {:?}", keep_index);
 
     //LD PRUNE PHASE 1
     // Prune the LD=1 variants out!
@@ -110,12 +108,13 @@ fn main() {
     //Make another skip/prune index
     let mut prune_index: HashSet<usize> = HashSet::new();
     //Set LD threshold
-    let ld_threshold = 0.98f64;
+    let ld_threshold = 0.9999999f64;
 
-    for i in 0..n_cols {
-        for j in i..n_cols {
-            if !prune_index.contains(&i) && !prune_index.contains(&j) {
-                let d_prime_score = calculate_d_prime(&filtered_gt_data, i, j);
+    for i in 0..ldbelow1_gt_data.ncols() {
+        for j in i..ldbelow1_gt_data.ncols() {
+            if &i!=&j && !prune_index.contains(&i) && !prune_index.contains(&j) {
+                let d_prime_score = calculate_d_prime(&ldbelow1_gt_data, i, j);
+                println!("{:?}", d_prime_score);
                 if d_prime_score >= ld_threshold {
                     prune_index.insert(i);
                 }
@@ -124,10 +123,19 @@ fn main() {
     }
     println!("Prune index: {:?}", prune_index);
     
+    //turn skip index into keep index (so can use in pruning .select() function)
+    //there is probably a better way to do this but this is quick and dirty
+    let prune_index: Vec<_> = prune_index.into_iter().collect();
+    let keep_prune_index: Vec<usize> = (0..(ldbelow1_gt_data.ncols()-1)).collect::<Vec<_>>().into_iter().filter(|x| prune_index.contains(x) == false).collect::<Vec<usize>>();
+    println!("Keep prune index: {:?}", keep_prune_index);
+
     //LD PRUNE PHASE 2
     // Prune the LD>=threshold variants out!
-    
+    let full_prune_gt_data = ldbelow1_gt_data.select(Axis(1), &keep_prune_index.as_slice());
+    println!("{:?}", full_prune_gt_data);
 
+    //is it pruning out every single variant? (instead of leaving one)
+    //no, it's that the d prime scores are 1 for every variant
 
 }
 
