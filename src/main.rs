@@ -4,8 +4,8 @@
 //Remember that Rust indexing starts at 0 - make sure that all frequencies etc. are correctly indexed!!
 
 //libraries:
-use std::{error::Error, io, process, ops::Div};
-use polars::{prelude::*, frame::row::Row};
+use std::{ops::Div};
+
 //extern crate csv;
 use ndarray::prelude::*;
 use ndarray::OwnedRepr;
@@ -14,29 +14,23 @@ use csv::ReaderBuilder;
 use ndarray::Array2;
 use std::fs::File;
 use ndarray_csv::Array2Reader;
-use ndarray::Zip;
-
-use ndarray_csv::Array2Writer;
 
 use std::cmp::Ordering;
 use std::fs::OpenOptions;
 
-//use serde::Serialize;
-
 use std::collections::HashSet;
-use csv::Writer;
-use csv::WriterBuilder;
 
- 
+
+
 fn main() -> Result<(), csv::Error> {
     println!("Welcome to the LD Pruning Module.");
 
-    //to read in data, need to know the number of rows and columns in your data
+    //to read in data, need to know the number of rows and columns in your data (including header)
     let n_rows = 603;
-    let n_cols = 1000; //including header
+    let n_cols = 198248;
 
     // Read in data
-    let raw_gt_data = read_csv("3000_gts.csv", n_rows, n_cols);
+    let raw_gt_data = read_csv("pyseer_complete.csv", n_rows, n_cols);
     println!("{:?}", raw_gt_data);
     println!("Your data has been successfully read in. Sit tight while we run your analysis.");
 
@@ -164,7 +158,7 @@ fn main() -> Result<(), csv::Error> {
     //writer.serialize_array2(&full_prune_gt_data)?;
 
 
-    let mut file = OpenOptions::new()
+    let file = OpenOptions::new()
         .write(true)
         .create(true)
         .append(true)
@@ -173,7 +167,7 @@ fn main() -> Result<(), csv::Error> {
     let mut wtr = csv::Writer::from_writer(file);
 
     for i in 0..full_prune_gt_data.nrows() {
-        wtr.write_record(&string_arr.slice(s![i, ..]));
+        wtr.write_record(&string_arr.slice(s![i, ..])).expect("Error in writing to .csv");
     }
 
     wtr.flush()?;
