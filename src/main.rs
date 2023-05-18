@@ -5,7 +5,6 @@
 
 //libraries:
 use std::{error::Error, io, process, ops::Div};
-use ndarray_rand::rand_distr::num_traits::zero;
 use polars::{prelude::*, frame::row::Row};
 //extern crate csv;
 use ndarray::prelude::*;
@@ -20,22 +19,26 @@ use ndarray::Zip;
 
 use std::cmp::Ordering;
 
+//use serde::Serialize;
+
 use std::collections::HashSet;
+use csv::Writer;
 
-
-fn main() {
+fn main() -> Result<(), csv::Error> {
     println!("Welcome to the LD Pruning Module.");
 
+    //to read in data, need to know the number of rows and columns in your data
+    let n_rows = 603;
+    let n_cols = 198248; //including header
+
     // Read in data
-    let raw_gt_data = read_csv("3000_gts.csv");
+    let raw_gt_data = read_csv("pyseer_complete.csv", n_rows, n_cols);
     println!("{:?}", raw_gt_data);
     println!("Your data has been successfully read in. Sit tight while we run your analysis.");
 
     //To-do
     // Automatically find the number of rows and columns (samples and variants) in the df
     // Use those numbers for further calculations
-    let n_rows = raw_gt_data.nrows();
-    let n_cols = raw_gt_data.ncols();
 
     //Calculate MAF
     let mafs = calc_maf(&raw_gt_data);
@@ -45,9 +48,6 @@ fn main() {
     let cutoff = 0.01f64;
     let filtered_gt_data = maf_prune(&raw_gt_data, &mafs, &cutoff);
     println!("Data were successfully filtered by MAF.");
-    
-    //Update V after discarding variants
-    let n_cols = filtered_gt_data.ncols();
 
     //Update MAF list after discarding variants
     let mafs = calc_maf(&filtered_gt_data);
@@ -67,8 +67,8 @@ fn main() {
     //without causing any indexing issues
     //The skip index also acts as the record of which variants should be pruned out of the dataset
 
-    for i in 0..n_cols {
-        for j in i..n_cols {
+    for i in 0..filtered_gt_data.ncols() {
+        for j in i..filtered_gt_data.ncols() {
             //when i = j (are the same variant) in the for loops, the snp will prune itself out
             // hence why needed to add the && i!=j condition
             if mafs[i] == mafs[j] && i != j && !skip_index.contains(&i) && !skip_index.contains(&j) { //inside this loop is one snp vs one snp
@@ -111,7 +111,7 @@ fn main() {
 
     for i in 0..ldbelow1_gt_data.ncols() {
         for j in i..ldbelow1_gt_data.ncols() {
-            if &i!=&j && !prune_index.contains(&i) && !prune_index.contains(&j) {
+            if i != j && !prune_index.contains(&i) && !prune_index.contains(&j) {
                 let d_prime_score = calculate_d_prime(&ldbelow1_gt_data, i, j);
                 println!("{:?}", d_prime_score);
                 if d_prime_score >= ld_threshold {
@@ -133,19 +133,29 @@ fn main() {
     let full_prune_gt_data = ldbelow1_gt_data.select(Axis(1), &keep_prune_index.as_slice());
     println!("{:?}", full_prune_gt_data);
 
-    //is it pruning out every single variant? (instead of leaving one)
-    //no, it's that the d prime scores are 1 for every variant
-    //but maybe it's also pruning out all variants instead of leaving one?
+    //I think it's pruning out every single variant? (instead of leaving one)
+
+    //Write results to .csv
+    // Make sure to include column names (headers)
+    // could maybe use .skip(1) to skip the first row throughout the program?
+    //full_prune_gt_data.records();
+    
+    //let headers = full_prune_gt_data.headers()?;
+
+    let output_path = "~/Desktop/rustresults";
+
+    let string_arr = full_prune_gt_data.map(|e| e.to_string());
+    let mut file = Writer::from_path(output_path)?;
+    file.write_record(string_arr)
 
 }
 
 // MAIN FUNCTION DEFINITIONS
 
-fn read_csv(path_to_file: &str) -> Array2<f64> {
-    //1000 cols, 604 rows (incl. headers)
+fn read_csv(path_to_file: &str, n_rows:usize, n_cols:usize) -> Array2<f64> {
     let file = File::open(path_to_file).expect("File not found :(");
     let mut reader = ReaderBuilder::new().has_headers(true).from_reader(file);
-    reader.deserialize_array2::<f64>((603, 1000)).expect("Failed to unwrap .csv file.")
+    reader.deserialize_array2::<f64>((n_rows,n_cols)).expect("Failed to unwrap .csv file.")
 }
 
 fn calc_maf(data:&Array2<f64>) -> Array1<f64> {
@@ -272,3 +282,4 @@ fn calculate_d_prime(data: &ArrayBase<OwnedRepr<f64>, Dim<[usize; 2]>>, varianta
     }
 
 }
+
