@@ -22,6 +22,11 @@ use std::fs::OpenOptions;
 use std::collections::HashSet;
 
 
+use rgsl::{
+    randist::t_distribution::{tdist_P, tdist_Q},
+    statistics::correlation,
+};
+
 fn main() -> Result<(), csv::Error> {
     println!("Welcome to the LD Pruning Module.");
 
@@ -53,24 +58,43 @@ fn main() -> Result<(), csv::Error> {
 
     //Spearman's coefficient
     //Works for binary (SNP, AMR), continuous (E-test), and ordinal (MICs) data
-    fn correlationscore(gtdata:&Array2<f64>, phendata:&Array1<f64>, variant:usize) {
+    fn correlationscore(gtdata:&Array2<f64>, phendata:&Array1<f64>, variant:usize) -> f64 {
         //to use continuous data, must first rank
         //otherwise, it's fine to use binary AMR data or categorical ordinal MIC data directly (skip to next section)
 
         //calculate correlation coefficient
-        let disqrd:Array1<f64> = (&gtdata.slice(s![..,variant]) - phendata).iter().map(|x| x.powf(2.0)).collect();
-        let corrcoeff = 1-(((6usize*disqrd.sum().to_usize().unwrap()))/(disqrd.len().pow(3)-disqrd.len()));
+        //let disqrd:Array1<f64> = (&gtdata.slice(s![..,variant]) - phendata).iter().map(|x| x.powf(2.0)).collect();
+        //let corrcoeff = 1-(((6usize*disqrd.sum().to_usize().unwrap()))/(disqrd.len().pow(3)-disqrd.len()));
         
         //calculate p value
-        use z_table::{lookup_with, reverse_lookup_with};
-        use rand_distr::{StudentT, Distribution};
+        //use z_table::{lookup_with, reverse_lookup_with};
+        //use rand_distr::{StudentT, Distribution};
 
-        let ttest = (corrcoeff*(disqrd.len()-2).sqrt())/((1-corrcoeff.pow(2)).sqrt());
+        //let ttest = (corrcoeff*(disqrd.len()-2).sqrt())/((1-corrcoeff.pow(2)).sqrt());
+        //let tcrit = 
 
+        let gtdat = gtdata.slice(s![..,variant]).to_vec();
+        let phendata = phendata.to_vec();
+
+        let r = correlation(&gtdat, 1, &phendata, 1, gtdata.len_of(Axis(0)));
+
+        let df = (gtdata.len_of(Axis(0)) - 2) as f64;
+        let statistic = df.sqrt() * r / (1.0 - r.powi(2)).sqrt();
+        let p_value:f64 = 2.0 * tdist_P(statistic, df).min(tdist_Q(statistic, df));
+        return p_value;
         //let pval:f64 = ;
     }
 
+    //read in phenotype data
+    let phenotype_data = read_csv("resistances.csv", 603, 2);
+    let phenotype_data = phenotype_data.slice(s![..,1]);
 
+
+    //use correlation function and phenotype data data to calculate p values for each variant
+    for i in 0..=filtered_gt_data.nrows() {
+        let pval = correlationscore(&filtered_gt_data.to_owned(), &phenotype_data.to_owned(), i);
+        println!("P value for variant {:?} is: {:?}", i, pval)
+    }
 
 
 
