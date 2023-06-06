@@ -12,6 +12,7 @@ use ndarray::OwnedRepr;
 
 use csv::ReaderBuilder;
 use ndarray::Array2;
+use ndarray_rand::rand_distr::num_traits::ToPrimitive;
 use std::fs::File;
 use ndarray_csv::Array2Reader;
 
@@ -19,7 +20,6 @@ use std::cmp::Ordering;
 use std::fs::OpenOptions;
 
 use std::collections::HashSet;
-
 
 
 fn main() -> Result<(), csv::Error> {
@@ -49,6 +49,31 @@ fn main() -> Result<(), csv::Error> {
 
     //Update MAF list after discarding variants
     let mafs = calc_maf(&filtered_gt_data);
+
+
+    //Spearman's coefficient
+    //Works for binary (SNP, AMR), continuous (E-test), and ordinal (MICs) data
+    fn correlationscore(gtdata:&Array2<f64>, phendata:&Array1<f64>, variant:usize) {
+        //to use continuous data, must first rank
+        //otherwise, it's fine to use binary AMR data or categorical ordinal MIC data directly (skip to next section)
+
+        //calculate correlation coefficient
+        let disqrd:Array1<f64> = (&gtdata.slice(s![..,variant]) - phendata).iter().map(|x| x.powf(2.0)).collect();
+        let corrcoeff = 1-(((6usize*disqrd.sum().to_usize().unwrap()))/(disqrd.len().pow(3)-disqrd.len()));
+        
+        //calculate p value
+        use z_table::{lookup_with, reverse_lookup_with};
+        use rand_distr::{StudentT, Distribution};
+
+        let ttest = (corrcoeff*(disqrd.len()-2).sqrt())/((1-corrcoeff.pow(2)).sqrt());
+
+        //let pval:f64 = ;
+    }
+
+
+
+
+
 
     // If you wanted to ONLY prune out those with LD=1, you could do it with just the following steps:
     //1. Sort by MAF
@@ -109,13 +134,13 @@ fn main() -> Result<(), csv::Error> {
     //Make another skip/prune index
     let mut prune_index: HashSet<usize> = HashSet::new();
     //Set LD threshold
-    let ld_threshold = 0.99f64;
+    let ld_threshold = 0.95f64;
 
     for i in 0..ldbelow1_gt_data.ncols() {
         for j in i..ldbelow1_gt_data.ncols() {
             //add if loop here with SNPrune calculation of how close mafs have to be to run rest
             //quick and dirty method here: if (mafs[i] - mafs[j]).abs() <= 0.05 
-            if i != j && !prune_index.contains(&i) && !prune_index.contains(&j) && (mafs[i] - mafs[j]).abs() <= 0.05 {
+            if i != j && !prune_index.contains(&i) && !prune_index.contains(&j) && (mafs[i] - mafs[j]).abs() <= 0.1 {
                 //here you have to calculate the AFs, haplotypes freqs, etc. for the d_prime_score function
                 //would be more efficient to calculate these once, and reference that matrix
                 let d_prime_score = calculate_d_prime(&ldbelow1_gt_data, i, j);
@@ -124,7 +149,8 @@ fn main() -> Result<(), csv::Error> {
                 }
             }
         }
-        println!("{:?} of 198248 variants has been completed.", i);
+        println!("{:?} of 198248 variants have been completed.", i);
+        println!("That's {:?}% complete.", i.div(198248));
     }
 
     //turn skip index into keep index (so can use in pruning .select() function)
@@ -138,6 +164,7 @@ fn main() -> Result<(), csv::Error> {
     println!("LD pruning phase 2 has been completed.");
 
     //I think it's pruning out every single variant? (instead of leaving one)
+
 
     //Write results to .csv
     // Make sure to include column names (headers)

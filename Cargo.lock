@@ -1383,6 +1383,7 @@ dependencies = [
  "noisy_float",
  "polars",
  "poloto",
+ "z_table",
 ]
 
 [[package]]
@@ -1924,6 +1925,12 @@ name = "xxhash-rust"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "735a71d46c4d68d71d4b24d03fdc2b98e38cea81730595801db779c04fe80d70"
+
+[[package]]
+name = "z_table"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f941d169bce939a96f44971d48012818cb214a3284a899c7bd1913ed6c2be33f"
 
 [[package]]
 name = "zstd"
