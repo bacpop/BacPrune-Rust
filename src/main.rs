@@ -30,6 +30,10 @@ use rgsl::{
 fn main() -> Result<(), csv::Error> {
     println!("Welcome to the LD Pruning Module.");
 
+    use std::env;
+    let key = "RUSTFLAGS";
+    env::set_var(key, "-L /opt/homebrew/include");
+
     //to read in data, need to know the number of rows and columns in your data (including header)
     let n_rows = 603;
     let n_cols = 198248;
