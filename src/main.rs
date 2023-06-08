@@ -21,18 +21,17 @@ use std::fs::OpenOptions;
 
 use std::collections::HashSet;
 
-
-use rgsl::{
-    randist::t_distribution::{tdist_P, tdist_Q},
-    statistics::correlation,
-};
+//use rgsl::{
+//    randist::t_distribution::{tdist_P, tdist_Q},
+//    statistics::correlation,
+//};
 
 fn main() -> Result<(), csv::Error> {
     println!("Welcome to the LD Pruning Module.");
 
     use std::env;
     let key = "RUSTFLAGS";
-    env::set_var(key, "-L /opt/homebrew/include");
+    env::set_var(key, "/Users/lilyjacqueline/mambaforge/pkgs/gsl-2.7.1-hdbe807d_1/bin/gsl-config");
 
     //to read in data, need to know the number of rows and columns in your data (including header)
     let n_rows = 603;
@@ -62,7 +61,7 @@ fn main() -> Result<(), csv::Error> {
 
     //Spearman's coefficient
     //Works for binary (SNP, AMR), continuous (E-test), and ordinal (MICs) data
-    fn correlationscore(gtdata:&Array2<f64>, phendata:&Array1<f64>, variant:usize) -> f64 {
+    fn correlationscore(gtdata:&Array2<f64>, phendata:&Array1<f64>, variant:usize) {
         //to use continuous data, must first rank
         //otherwise, it's fine to use binary AMR data or categorical ordinal MIC data directly (skip to next section)
 
@@ -77,16 +76,21 @@ fn main() -> Result<(), csv::Error> {
         //let ttest = (corrcoeff*(disqrd.len()-2).sqrt())/((1-corrcoeff.pow(2)).sqrt());
         //let tcrit = 
 
-        let gtdat = gtdata.slice(s![..,variant]).to_vec();
-        let phendata = phendata.to_vec();
+        //TRYING rgsl stuff
+        //let gtdat = gtdata.slice(s![..,variant]).to_vec();
+        //let phendata = phendata.to_vec();
 
-        let r = correlation(&gtdat, 1, &phendata, 1, gtdata.len_of(Axis(0)));
+        //let r = correlation(&gtdat, 1, &phendata, 1, gtdata.len_of(Axis(0)));
 
-        let df = (gtdata.len_of(Axis(0)) - 2) as f64;
-        let statistic = df.sqrt() * r / (1.0 - r.powi(2)).sqrt();
-        let p_value:f64 = 2.0 * tdist_P(statistic, df).min(tdist_Q(statistic, df));
-        return p_value;
-        //let pval:f64 = ;
+        //let df = (gtdata.len_of(Axis(0)) - 2) as f64;
+        //let statistic = df.sqrt() * r / (1.0 - r.powi(2)).sqrt();
+        //let p_value:f64 = 2.0 * tdist_P(statistic, df).min(tdist_Q(statistic, df));
+        //return p_value;
+
+        //TRYING linear regression by hand
+
+
+
     }
 
     //read in phenotype data
@@ -95,10 +99,10 @@ fn main() -> Result<(), csv::Error> {
 
 
     //use correlation function and phenotype data data to calculate p values for each variant
-    for i in 0..=filtered_gt_data.nrows() {
-        let pval = correlationscore(&filtered_gt_data.to_owned(), &phenotype_data.to_owned(), i);
-        println!("P value for variant {:?} is: {:?}", i, pval)
-    }
+    //for i in 0..=filtered_gt_data.nrows() {
+    //    let pval = correlationscore(&filtered_gt_data.to_owned(), &phenotype_data.to_owned(), i);
+    //    println!("P value for variant {:?} is: {:?}", i, pval)
+    //}
 
 
 
