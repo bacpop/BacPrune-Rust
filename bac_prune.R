@@ -1,7 +1,7 @@
 # LD pruning homemade
 
 data <- read.csv("~/rust_prune/rust_prune_4/3000_gts.csv")
-haplotype_frequencies <- as.data.frame(table(data[,5], data[,2])/603)
+haplotype_frequencies <- table(factor(gt[,5], levels = c(0,1)), factor(gt[,2], levels = c(0,1)))
 
 
 ### Data wrangle
@@ -13,8 +13,8 @@ gt <- extract.gt(pyseer_snps, as.numeric = TRUE, IDtoRowNames = T)
 # transpose genotype data (want samples in rows and variants in columns)
 gt <- t(gt)
 
-# temporarily - use only 3000 randomly sampled variants to make code run faster
-gt <- gt[ , sample(ncol(gt),3000)]
+# temporarily - use only 1000 randomly sampled variants to make code run faster
+gt <- gt[ , sample(ncol(gt),1000)]
 V <- as.numeric(ncol(gt)) #as normal
 N <- as.numeric(nrow(gt)) #as normal
 
@@ -89,7 +89,8 @@ find_haplotype_frequencies <- function(data, variantA, variantB, compact = TRUE)
 find_D_prime <- function(data, variantA, variantB, hap_freq_data, allele_freq_data) {
   if (missing(hap_freq_data)) {
     # find haplotype frequencies for the combination
-    haplotype_frequencies <- table(data[,variantA], data[,variantB])/N
+    #haplotype_frequencies <- table(data[,variantA], data[,variantB])/N
+    haplotype_frequencies <- table(factor(gt[,variantA], levels = c(0,1)), factor(gt[,variantB], levels = c(0,1)))/N
   } else {
     haplotype_frequencies <- hap_freq_data
   }
@@ -107,8 +108,12 @@ find_D_prime <- function(data, variantA, variantB, hap_freq_data, allele_freq_da
     set_elements <- as.numeric(c((-1 * allele_frequencies[variantA,1] * allele_frequencies[variantB,1]) , (-1 * allele_frequencies[variantA,2] * allele_frequencies[variantB,2])))
     D_max <- max(set_elements)
   } else {
+    if (D>0) {
     set_elements <- as.numeric(c((allele_frequencies[variantA,1] * allele_frequencies[variantB,2]) , (allele_frequencies[variantA,2] * allele_frequencies[variantB,1])))
     D_max <- min(set_elements)
+    } else {
+      D_max <- 1
+    }
   }
   #calculate D_prime
   D_prime <- D/D_max
@@ -131,6 +136,24 @@ for (i in 1:V) {
 
 # It works!!
 
+library(ggplot2)
+hist <- hist(x = D_prime_matrix, freq = TRUE, xlab = "D' scores", main = "LD in 3k S. pneumoniae variants",
+             col = "orange2",
+             breaks = 10, )
+
+
+ninetyeight <- length(which(D_prime_matrix > 0.98))
+ninetynine <- length(which(D_prime_matrix > 0.99))
+one <- length(which(D_prime_matrix == 1))
+
+whole <- length(which(D_prime_matrix >= 0))
+
+ninetyeight/whole
+ninetynine/whole
+one/whole
+
+
+plot(dbeta(c(0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1),1.1,1.1))
 
 ### LD Pruning
 
