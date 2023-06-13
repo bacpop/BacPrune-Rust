@@ -28,23 +28,36 @@ use std::collections::HashSet;
 
 fn main() -> Result<(), csv::Error> {
     println!("Welcome to the LD Pruning Module.");
-
+/* 
     use std::env;
     let key = "RUSTFLAGS";
     env::set_var(key, "/Users/lilyjacqueline/mambaforge/pkgs/gsl-2.7.1-hdbe807d_1/bin/gsl-config");
-
+*/
     //to read in data, need to know the number of rows and columns in your data (including header)
-    let n_rows = 603;
-    let n_cols = 198248;
+    let n_rows = 604;
+    let n_cols = 61732;
 
     // Read in data
-    let raw_gt_data = read_csv("pyseer_complete.csv", n_rows, n_cols);
+    //let raw_gt_data = read_csv("pyseer_complete.csv", n_rows, n_cols);
+    
+    let raw_gt_data = read_csv("linphen_gts.csv", n_rows, n_cols);
     println!("{:?}", raw_gt_data);
     println!("Your data has been successfully read in. Sit tight while we run your analysis.");
 
+    //turn "has headers" to false in read.csv function, copy header into seperate vector, then remove it from gt (just remove first row)
+    let gt_header = raw_gt_data.select(Axis(0), &[0usize]);
+    let raw_gt_data = raw_gt_data.slice(s![1..raw_gt_data.nrows(),..]).to_owned();
+    //let raw_gt_data = raw_gt_data.select(Axis(0), &[1..raw_gt_data.ncols()]);
+    
+    //remove variants from header using skip index
+    //concat header with final pruned gt data and export as usual
+    //check that the headers match the variants by comparing header+SNP to original dataset's header+SNP (maybe by using match function to find identical columns?)
+
+
+
+
     //To-do
     // Automatically find the number of rows and columns (samples and variants) in the df
-    // Use those numbers for further calculations
 
     //Calculate MAF
     let mafs = calc_maf(&raw_gt_data);
@@ -61,7 +74,7 @@ fn main() -> Result<(), csv::Error> {
 
     //Spearman's coefficient
     //Works for binary (SNP, AMR), continuous (E-test), and ordinal (MICs) data
-    fn correlationscore(gtdata:&Array2<f64>, phendata:&Array1<f64>, variant:usize) {
+    //fn correlationscore(gtdata:&Array2<f64>, phendata:&Array1<f64>, variant:usize) {
         //to use continuous data, must first rank
         //otherwise, it's fine to use binary AMR data or categorical ordinal MIC data directly (skip to next section)
 
@@ -91,12 +104,13 @@ fn main() -> Result<(), csv::Error> {
 
 
 
-    }
+    //}
 
+/* 
     //read in phenotype data
     let phenotype_data = read_csv("resistances.csv", 603, 2);
     let phenotype_data = phenotype_data.slice(s![..,1]);
-
+*/
 
     //use correlation function and phenotype data data to calculate p values for each variant
     //for i in 0..=filtered_gt_data.nrows() {
@@ -144,14 +158,18 @@ fn main() -> Result<(), csv::Error> {
     
     //turn skip index into keep index (so can use in pruning .select() function)
     //there is probably a better way to do this but this is quick and dirty
+    println!("Skip index before collecting: {:?}", skip_index);
     let skip_index: Vec<_> = skip_index.into_iter().collect();
+    println!("Skip index after collecting: {:?}", skip_index);
     let keep_index: Vec<usize> = (0..(sorted_gt_data.ncols()-1)).collect::<Vec<_>>().into_iter().filter(|x| skip_index.contains(x) == false).collect::<Vec<usize>>();
+    println!("Keep index: {:?}", keep_index);
 
     //LD PRUNE PHASE 1
     // Prune the LD=1 variants out!
     let ldbelow1_gt_data = sorted_gt_data.select(Axis(1), keep_index.as_slice());
     println!("LD pruning phase 1 has been completed.");
 
+/*
    //If user wants to prune for LD=1 cases, program ends here.
    //(Note that the program doesn't prune ALL LD=1 cases, just some)
    //If user wants to prune for LD<1 cases, continue:
@@ -197,13 +215,20 @@ fn main() -> Result<(), csv::Error> {
 
     //I think it's pruning out every single variant? (instead of leaving one)
 
-
+*/
     //Write results to .csv
     // Make sure to include column names (headers)
     // could maybe use .skip(1) to skip the first row throughout the program?
     //full_prune_gt_data.records();
+
+
     
-    let string_arr = full_prune_gt_data.map(|e| e.to_string());
+    //ADD HEADER BACK IN
+    ndarray::concatenate![Axis(0), gt_header, ldbelow1_gt_data];
+
+
+    let string_arr = ldbelow1_gt_data.map(|e| e.to_string());
+    //let string_arr = full_prune_gt_data.map(|e| e.to_string());
     println!("String array: {:?}", string_arr);
 
     let file = OpenOptions::new()
@@ -214,9 +239,15 @@ fn main() -> Result<(), csv::Error> {
         .unwrap();
     let mut wtr = csv::Writer::from_writer(file);
 
+    for i in 0..ldbelow1_gt_data.nrows() {
+        wtr.write_record(&string_arr.slice(s![i, ..])).expect("Error in writing to .csv");
+    }
+
+/*
     for i in 0..full_prune_gt_data.nrows() {
         wtr.write_record(&string_arr.slice(s![i, ..])).expect("Error in writing to .csv");
     }
+*/
 
     wtr.flush()?;
     
@@ -228,7 +259,7 @@ fn main() -> Result<(), csv::Error> {
 
 fn read_csv(path_to_file: &str, n_rows:usize, n_cols:usize) -> Array2<f64> {
     let file = File::open(path_to_file).expect("File not found :(");
-    let mut reader = ReaderBuilder::new().has_headers(true).from_reader(file);
+    let mut reader = ReaderBuilder::new().has_headers(false).from_reader(file);
     reader.deserialize_array2::<f64>((n_rows,n_cols)).expect("Failed to unwrap .csv file.")
 }
 

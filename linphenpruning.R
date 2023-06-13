@@ -187,6 +187,9 @@ ggplot(model, aes(x=xaxis, y=-log10(p_values))) +
   geom_point()
 
 
-
-# Other
+### Other
 k <- kruskal.test(x = linphen$V2, g = linphen$V1)
+
+### Export 
+write.csv(pruned_gt, file = "~/Documents/GitHub/BacPrune-Rust/linphen_gts.csv", row.names = FALSE)
+
