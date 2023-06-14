@@ -122,7 +122,9 @@ fn main() -> Result<(), csv::Error> {
 
     // If you wanted to ONLY prune out those with LD=1, you could do it with just the following steps:
     //1. Sort by MAF
-    let sorted_gt_data = sort_by_maf(&mafs, &filtered_gt_data);
+    //let sorted_gt_data = sort_by_maf(&mafs, &filtered_gt_data);
+    //let mafs = calc_maf(&sorted_gt_data);
+
     //2. For each pair of SNPs with same MAF:
     //2. Pairwise comparison of all individuals checking that there are at least one pair of indivs that is not perfectly 0/0 or 1/1; the second you find that pair, break
     //3. Else (meaning if that pair doesn't exist), then prune out the lower MAF sample (see SNPPrune paper pg.2)
@@ -139,9 +141,9 @@ fn main() -> Result<(), csv::Error> {
         for j in i..filtered_gt_data.ncols() {
             //when i = j (are the same variant) in the for loops, the snp will prune itself out
             // hence why needed to add the && i!=j condition
-            if mafs[i] == mafs[j] && i != j && !skip_index.contains(&i) && !skip_index.contains(&j) { //inside this loop is one snp vs one snp
+            if mafs[i] == mafs[j] && i != j && skip_index.contains(&i) == false && skip_index.contains(&j) == false { //inside this loop is one snp vs one snp
                 //sum row of the two SNPs
-                let rowsums_ij = sorted_gt_data.select(Axis(1), &[i,j]).sum_axis(Axis(1));
+                let rowsums_ij = filtered_gt_data.select(Axis(1), &[i,j]).sum_axis(Axis(1));
                 //if any rowsums are equal to 1, then the SNP pair is not in perfect LD (so break)
                 //if no rowsums are 1 (meaning all rowsums are 0 or 2, aka all pairs of individuals are 00 or 11),
                 //then prune one of the snps
@@ -158,11 +160,11 @@ fn main() -> Result<(), csv::Error> {
     //turn skip index into keep index (so can use in pruning .select() function)
     //there is probably a better way to do this but this is quick and dirty
     let skip_index: Vec<_> = skip_index.into_iter().collect();
-    let keep_index: Vec<usize> = (0..(sorted_gt_data.ncols()-1)).collect::<Vec<_>>().into_iter().filter(|x| skip_index.contains(x) == false).collect::<Vec<usize>>();
+    let keep_index: Vec<usize> = (0..filtered_gt_data.ncols()-1).collect::<Vec<_>>().into_iter().filter(|x| skip_index.contains(x) == false).collect::<Vec<usize>>();
 
     //LD PRUNE PHASE 1
     // Prune the LD=1 variants out!
-    let ldbelow1_gt_data = sorted_gt_data.select(Axis(1), keep_index.as_slice());
+    let ldbelow1_gt_data = filtered_gt_data.select(Axis(1), keep_index.as_slice());
     println!("LD pruning phase 1 has been completed.");
 
 /*

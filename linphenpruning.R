@@ -193,3 +193,19 @@ k <- kruskal.test(x = linphen$V2, g = linphen$V1)
 ### Export 
 write.csv(pruned_gt, file = "~/Documents/GitHub/BacPrune-Rust/linphen_gts.csv", row.names = FALSE)
 
+### View after Rust pruning
+postrust_gts <- read.csv("~/Documents/GitHub/BacPrune-Rust/bacprune_rust_results.csv", header = TRUE)
+postrust_gts2 <- read.csv("~/Documents/GitHub/BacPrune-Rust/bacprune_rust_results.csv", header = TRUE)
+
+model <- cor(postrust_gts, resistances$K, method = "spearman")
+model <- as.data.frame(model)
+
+p_values <- c()
+for (i in 1:ncol(postrust_gts)) {
+  p_value <- cor.test(postrust_gts[,i], resistances$K, method = "spearman")
+  p_values <- append(p_values, p_value$p.value)
+}
+
+xaxis <- seq(1, ncol(postrust_gts), by = 1)
+ggplot(model, aes(x=xaxis, y=-log10(p_values))) + 
+  geom_point()
