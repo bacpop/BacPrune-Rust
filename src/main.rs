@@ -47,7 +47,6 @@ fn main() -> Result<(), csv::Error> {
     //turn "has headers" to false in read.csv function, copy header into seperate vector, then remove it from gt (just remove first row)
     let gt_header = raw_gt_data.select(Axis(0), &[0usize]);
     let raw_gt_data = raw_gt_data.slice(s![1..raw_gt_data.nrows(),..]).to_owned();
-    //let raw_gt_data = raw_gt_data.select(Axis(0), &[1..raw_gt_data.ncols()]);
     
     //remove variants from header using skip index
     //concat header with final pruned gt data and export as usual
@@ -158,11 +157,8 @@ fn main() -> Result<(), csv::Error> {
     
     //turn skip index into keep index (so can use in pruning .select() function)
     //there is probably a better way to do this but this is quick and dirty
-    println!("Skip index before collecting: {:?}", skip_index);
     let skip_index: Vec<_> = skip_index.into_iter().collect();
-    println!("Skip index after collecting: {:?}", skip_index);
     let keep_index: Vec<usize> = (0..(sorted_gt_data.ncols()-1)).collect::<Vec<_>>().into_iter().filter(|x| skip_index.contains(x) == false).collect::<Vec<usize>>();
-    println!("Keep index: {:?}", keep_index);
 
     //LD PRUNE PHASE 1
     // Prune the LD=1 variants out!
@@ -225,7 +221,7 @@ fn main() -> Result<(), csv::Error> {
     
     //ADD HEADER BACK IN
     let gt_header = gt_header.select(Axis(1), keep_index.as_slice());
-    ndarray::concatenate![Axis(0), gt_header, ldbelow1_gt_data];
+    let ldbelow1_gt_data = ndarray::concatenate![Axis(0), gt_header, ldbelow1_gt_data];
 
 
     let string_arr = ldbelow1_gt_data.map(|e| e.to_string());
