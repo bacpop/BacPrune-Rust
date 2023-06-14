@@ -65,7 +65,9 @@ fn main() -> Result<(), csv::Error> {
     
     //Discard variants with MAF below cutoff
     let cutoff = 0.01f64;
-    let filtered_gt_data = maf_prune(&raw_gt_data, &mafs, &cutoff);
+    //let filtered_gt_data = maf_prune(&raw_gt_data, &mafs, &cutoff);
+    let (filtered_gt_data, keep_index) = maf_prune(&raw_gt_data, &mafs, &cutoff);
+    let gt_header = gt_header.select(Axis(1), keep_index.as_slice());
     println!("Data were successfully filtered by MAF.");
 
     //Update MAF list after discarding variants
@@ -117,8 +119,6 @@ fn main() -> Result<(), csv::Error> {
     //    let pval = correlationscore(&filtered_gt_data.to_owned(), &phenotype_data.to_owned(), i);
     //    println!("P value for variant {:?} is: {:?}", i, pval)
     //}
-
-
 
 
     // If you wanted to ONLY prune out those with LD=1, you could do it with just the following steps:
@@ -224,6 +224,7 @@ fn main() -> Result<(), csv::Error> {
 
     
     //ADD HEADER BACK IN
+    let gt_header = gt_header.select(Axis(1), keep_index.as_slice());
     ndarray::concatenate![Axis(0), gt_header, ldbelow1_gt_data];
 
 
@@ -269,7 +270,7 @@ fn calc_maf(data:&Array2<f64>) -> Array1<f64> {
     return calcmafs;
 }
 
-fn maf_prune(data:&Array2<f64>, mafs:&Array1<f64>, cutoff:&f64) -> Array2<f64> {
+fn maf_prune(data:&Array2<f64>, mafs:&Array1<f64>, cutoff:&f64) -> (Array2<f64>, Vec<usize>) {
     // Find index of each column with a MAF at or above the cutoff
     let keep_these_index = mafs
         .into_iter()
@@ -279,7 +280,7 @@ fn maf_prune(data:&Array2<f64>, mafs:&Array1<f64>, cutoff:&f64) -> Array2<f64> {
         .collect::<Vec<_>>();
 
     let filtered_data = data.select(Axis(1), &keep_these_index);
-    return filtered_data;
+    return (filtered_data, keep_these_index);
 }
 
 fn sort_by_maf(mafs:&Array1<f64>, data:&Array2<f64>) -> Array2<f64> {
