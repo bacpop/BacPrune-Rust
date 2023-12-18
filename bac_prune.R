@@ -153,8 +153,6 @@ ninetynine/whole
 one/whole
 
 
-plot(dbeta(c(0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1),1.1,1.1))
-
 ### LD Pruning
 
 LD_prune <- function(data, D_prime_matrix, cutoff) {
@@ -235,11 +233,5 @@ dataaaa <- LD_prune(gt, D_prime_matrix, .99)
 
 colnames(gt)[1]
 length(colnames(gt))
-
-# profiling tests
-
-bench::mark(find_haplotype_frequencies(data = gt, variantA = 1, variantB = 2))
-bench::mark(find_D_prime(data = gt, variantA = 1, variantB = 2))
-
 
 
