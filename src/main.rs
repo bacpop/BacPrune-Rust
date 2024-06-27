@@ -4,34 +4,59 @@
 //Remember that Rust indexing starts at 0 - make sure that all frequencies etc. are correctly indexed!!
 
 //libraries:
-use std::{error::Error, io, process, ops::Div};
-use ndarray_rand::rand_distr::num_traits::zero;
-use polars::{prelude::*, frame::row::Row};
+use std::{ops::Div};
+
 //extern crate csv;
 use ndarray::prelude::*;
 use ndarray::OwnedRepr;
 
 use csv::ReaderBuilder;
 use ndarray::Array2;
+use ndarray_rand::rand_distr::num_traits::ToPrimitive;
 use std::fs::File;
 use ndarray_csv::Array2Reader;
 
 use std::cmp::Ordering;
+use std::fs::OpenOptions;
 
+use std::collections::HashSet;
 
-fn main() {
+//use rgsl::{
+//    randist::t_distribution::{tdist_P, tdist_Q},
+//    statistics::correlation,
+//};
+
+fn main() -> Result<(), csv::Error> {
     println!("Welcome to the LD Pruning Module.");
+/* 
+    use std::env;
+    let key = "RUSTFLAGS";
+    env::set_var(key, "/Users/lilyjacqueline/mambaforge/pkgs/gsl-2.7.1-hdbe807d_1/bin/gsl-config");
+*/
+    //to read in data, need to know the number of rows and columns in your data (including header)
+    let n_rows = 604;
+    let n_cols = 61732;
 
     // Read in data
-    let raw_gt_data = read_csv("3000_gts.csv");
+    //let raw_gt_data = read_csv("pyseer_complete.csv", n_rows, n_cols);
+    
+    let raw_gt_data = read_csv("linphen_gts.csv", n_rows, n_cols);
     println!("{:?}", raw_gt_data);
     println!("Your data has been successfully read in. Sit tight while we run your analysis.");
 
+    //turn "has headers" to false in read.csv function, copy header into seperate vector, then remove it from gt (just remove first row)
+    let gt_header = raw_gt_data.select(Axis(0), &[0usize]);
+    let raw_gt_data = raw_gt_data.slice(s![1..raw_gt_data.nrows(),..]).to_owned();
+    
+    //remove variants from header using skip index
+    //concat header with final pruned gt data and export as usual
+    //check that the headers match the variants by comparing header+SNP to original dataset's header+SNP (maybe by using match function to find identical columns?)
+
+
+
+
     //To-do
     // Automatically find the number of rows and columns (samples and variants) in the df
-    // Use those numbers for further calculations
-    let n_rows = raw_gt_data.nrows();
-    let n_cols = raw_gt_data.ncols();
 
     //Calculate MAF
     let mafs = calc_maf(&raw_gt_data);
@@ -39,50 +64,202 @@ fn main() {
     
     //Discard variants with MAF below cutoff
     let cutoff = 0.01f64;
-    let filtered_gt_data = maf_prune(&raw_gt_data, &mafs, &cutoff);
+    //let filtered_gt_data = maf_prune(&raw_gt_data, &mafs, &cutoff);
+    let (filtered_gt_data, keep_index) = maf_prune(&raw_gt_data, &mafs, &cutoff);
+    let gt_header = gt_header.select(Axis(1), keep_index.as_slice());
     println!("Data were successfully filtered by MAF.");
-    
-    //Update V after discarding variants
-    let n_cols = filtered_gt_data.ncols();
 
     //Update MAF list after discarding variants
     let mafs = calc_maf(&filtered_gt_data);
 
+
+    //Spearman's coefficient
+    //Works for binary (SNP, AMR), continuous (E-test), and ordinal (MICs) data
+    //fn correlationscore(gtdata:&Array2<f64>, phendata:&Array1<f64>, variant:usize) {
+        //to use continuous data, must first rank
+        //otherwise, it's fine to use binary AMR data or categorical ordinal MIC data directly (skip to next section)
+
+        //calculate correlation coefficient
+        //let disqrd:Array1<f64> = (&gtdata.slice(s![..,variant]) - phendata).iter().map(|x| x.powf(2.0)).collect();
+        //let corrcoeff = 1-(((6usize*disqrd.sum().to_usize().unwrap()))/(disqrd.len().pow(3)-disqrd.len()));
+        
+        //calculate p value
+        //use z_table::{lookup_with, reverse_lookup_with};
+        //use rand_distr::{StudentT, Distribution};
+
+        //let ttest = (corrcoeff*(disqrd.len()-2).sqrt())/((1-corrcoeff.pow(2)).sqrt());
+        //let tcrit = 
+
+        //TRYING rgsl stuff
+        //let gtdat = gtdata.slice(s![..,variant]).to_vec();
+        //let phendata = phendata.to_vec();
+
+        //let r = correlation(&gtdat, 1, &phendata, 1, gtdata.len_of(Axis(0)));
+
+        //let df = (gtdata.len_of(Axis(0)) - 2) as f64;
+        //let statistic = df.sqrt() * r / (1.0 - r.powi(2)).sqrt();
+        //let p_value:f64 = 2.0 * tdist_P(statistic, df).min(tdist_Q(statistic, df));
+        //return p_value;
+
+        //TRYING linear regression by hand
+
+
+
+    //}
+
+/* 
+    //read in phenotype data
+    let phenotype_data = read_csv("resistances.csv", 603, 2);
+    let phenotype_data = phenotype_data.slice(s![..,1]);
+*/
+
+    //use correlation function and phenotype data data to calculate p values for each variant
+    //for i in 0..=filtered_gt_data.nrows() {
+    //    let pval = correlationscore(&filtered_gt_data.to_owned(), &phenotype_data.to_owned(), i);
+    //    println!("P value for variant {:?} is: {:?}", i, pval)
+    //}
+
+
     // If you wanted to ONLY prune out those with LD=1, you could do it with just the following steps:
     //1. Sort by MAF
-    let sorted_gt_data = sort_by_maf(&mafs, &filtered_gt_data);
+    //let sorted_gt_data = sort_by_maf(&mafs, &filtered_gt_data);
+    //let mafs = calc_maf(&sorted_gt_data);
+
     //2. For each pair of SNPs with same MAF:
     //2. Pairwise comparison of all individuals checking that there are at least one pair of indivs that is not perfectly 0/0 or 1/1; the second you find that pair, break
     //3. Else (meaning if that pair doesn't exist), then prune out the lower MAF sample (see SNPPrune paper pg.2)
 
+    //Create skip index (using HashSet package for a set)
+    let mut skip_index: HashSet<usize> = HashSet::new();
+    //When a variant is pruned, its index number is added to this set
+    //Before trying to compare two variants, the loop first checks that neither is in the index
+    //This means that variants that have already been pruned will be skipped over during furture iterations,
+    //without causing any indexing issues
+    //The skip index also acts as the record of which variants should be pruned out of the dataset
 
-    //If you wanted to be able to set a threshold other than just LD=1, you could run the above and then (with the reduced dataset) run everything after this:
+    for i in 0..filtered_gt_data.ncols() {
+        for j in i..filtered_gt_data.ncols() {
+            //when i = j (are the same variant) in the for loops, the snp will prune itself out
+            // hence why needed to add the && i!=j condition
+            if mafs[i] == mafs[j] && i != j && skip_index.contains(&i) == false && skip_index.contains(&j) == false { //inside this loop is one snp vs one snp
+                //sum row of the two SNPs
+                let rowsums_ij = filtered_gt_data.select(Axis(1), &[i,j]).sum_axis(Axis(1));
+                //if any rowsums are equal to 1, then the SNP pair is not in perfect LD (so break)
+                //if no rowsums are 1 (meaning all rowsums are 0 or 2, aka all pairs of individuals are 00 or 11),
+                //then prune one of the snps
+                if rowsums_ij.iter().any(|&i| i==1.0) == true {
+                    break;
+                } else {
+                    //add to skip index (to be pruned)
+                    skip_index.insert(i);
+                }
+            }
+        }
+    }
+    
+    //turn skip index into keep index (so can use in pruning .select() function)
+    //there is probably a better way to do this but this is quick and dirty
+    let skip_index: Vec<_> = skip_index.into_iter().collect();
+    let keep_index: Vec<usize> = (0..filtered_gt_data.ncols()-1).collect::<Vec<_>>().into_iter().filter(|x| skip_index.contains(x) == false).collect::<Vec<usize>>();
+
+    //LD PRUNE PHASE 1
+    // Prune the LD=1 variants out!
+    let ldbelow1_gt_data = filtered_gt_data.select(Axis(1), keep_index.as_slice());
+    println!("LD pruning phase 1 has been completed.");
+
+/*
+   //If user wants to prune for LD=1 cases, program ends here.
+   //(Note that the program doesn't prune ALL LD=1 cases, just some)
+   //If user wants to prune for LD<1 cases, continue:
+   //(with the reduced dataset) run everything after this:
 
     //Next: make it so you do not compare samples with very different MAFs
     //Maybe by sorting by MAF and only iterating over varBs that are within a certain range of varA
 
-    //Generate pairwise matrix of D' values
-    //let mut d_prime_matrix = Array::zeros((n_cols, n_cols));
-    //for i in 0..n_cols {
-    //    for j in 0..n_cols {
-    //        let d_prime_score = calculate_d_prime(&filtered_gt_data, i, j);
-    //        let got = std::mem::replace(&mut d_prime_matrix[[i,j]], d_prime_score);
-    //    }
-    //}
-    //println!("D prime matrix: {:?}", d_prime_matrix)
+    //Update MAF list after discarding variants
+    let mafs = calc_maf(&ldbelow1_gt_data);
+
+    //Make another skip/prune index
+    let mut prune_index: HashSet<usize> = HashSet::new();
+    //Set LD threshold
+    let ld_threshold = 0.95f64;
+
+    for i in 0..ldbelow1_gt_data.ncols() {
+        for j in i..ldbelow1_gt_data.ncols() {
+            //add if loop here with SNPrune calculation of how close mafs have to be to run rest
+            //quick and dirty method here: if (mafs[i] - mafs[j]).abs() <= 0.05 
+            if i != j && !prune_index.contains(&i) && !prune_index.contains(&j) && (mafs[i] - mafs[j]).abs() <= 0.1 {
+                //here you have to calculate the AFs, haplotypes freqs, etc. for the d_prime_score function
+                //would be more efficient to calculate these once, and reference that matrix
+                let d_prime_score = calculate_d_prime(&ldbelow1_gt_data, i, j);
+                if d_prime_score >= ld_threshold {
+                    prune_index.insert(i);
+                }
+            }
+        }
+        println!("{:?} of 198248 variants have been completed.", i);
+        println!("That's {:?}% complete.", i.div(198248));
+    }
+
+    //turn skip index into keep index (so can use in pruning .select() function)
+    //there is probably a better way to do this but this is quick and dirty
+    let prune_index: Vec<_> = prune_index.into_iter().collect();
+    let keep_prune_index: Vec<usize> = (0..(ldbelow1_gt_data.ncols()-1)).collect::<Vec<_>>().into_iter().filter(|x| prune_index.contains(x) == false).collect::<Vec<usize>>();
+
+    //LD PRUNE PHASE 2
+    // Prune the LD>=threshold variants out!
+    let full_prune_gt_data = ldbelow1_gt_data.select(Axis(1), &keep_prune_index.as_slice());
+    println!("LD pruning phase 2 has been completed.");
+
+    //I think it's pruning out every single variant? (instead of leaving one)
+
+*/
+    //Write results to .csv
+    // Make sure to include column names (headers)
+    // could maybe use .skip(1) to skip the first row throughout the program?
+    //full_prune_gt_data.records();
+
+
     
-    //LD Prune (return dataset minus the pruned variants)
+    //ADD HEADER BACK IN
+    let gt_header = gt_header.select(Axis(1), keep_index.as_slice());
+    let ldbelow1_gt_data = ndarray::concatenate![Axis(0), gt_header, ldbelow1_gt_data];
+
+
+    let string_arr = ldbelow1_gt_data.map(|e| e.to_string());
+    //let string_arr = full_prune_gt_data.map(|e| e.to_string());
+    println!("String array: {:?}", string_arr);
+
+    let file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .append(true)
+        .open("bacprune_rust_results.csv")
+        .unwrap();
+    let mut wtr = csv::Writer::from_writer(file);
+
+    for i in 0..ldbelow1_gt_data.nrows() {
+        wtr.write_record(&string_arr.slice(s![i, ..])).expect("Error in writing to .csv");
+    }
+
+/*
+    for i in 0..full_prune_gt_data.nrows() {
+        wtr.write_record(&string_arr.slice(s![i, ..])).expect("Error in writing to .csv");
+    }
+*/
+
+    wtr.flush()?;
     
+    Ok(())
 
 }
 
 // MAIN FUNCTION DEFINITIONS
 
-fn read_csv(path_to_file: &str) -> Array2<f64> {
-    //1000 cols, 604 rows (incl. headers)
+fn read_csv(path_to_file: &str, n_rows:usize, n_cols:usize) -> Array2<f64> {
     let file = File::open(path_to_file).expect("File not found :(");
-    let mut reader = ReaderBuilder::new().has_headers(true).from_reader(file);
-    reader.deserialize_array2::<f64>((603, 1000)).expect("Failed to unwrap .csv file.")
+    let mut reader = ReaderBuilder::new().has_headers(false).from_reader(file);
+    reader.deserialize_array2::<f64>((n_rows,n_cols)).expect("Failed to unwrap .csv file.")
 }
 
 fn calc_maf(data:&Array2<f64>) -> Array1<f64> {
@@ -91,7 +268,7 @@ fn calc_maf(data:&Array2<f64>) -> Array1<f64> {
     return calcmafs;
 }
 
-fn maf_prune(data:&Array2<f64>, mafs:&Array1<f64>, cutoff:&f64) -> Array2<f64> {
+fn maf_prune(data:&Array2<f64>, mafs:&Array1<f64>, cutoff:&f64) -> (Array2<f64>, Vec<usize>) {
     // Find index of each column with a MAF at or above the cutoff
     let keep_these_index = mafs
         .into_iter()
@@ -101,7 +278,7 @@ fn maf_prune(data:&Array2<f64>, mafs:&Array1<f64>, cutoff:&f64) -> Array2<f64> {
         .collect::<Vec<_>>();
 
     let filtered_data = data.select(Axis(1), &keep_these_index);
-    return filtered_data;
+    return (filtered_data, keep_these_index);
 }
 
 fn sort_by_maf(mafs:&Array1<f64>, data:&Array2<f64>) -> Array2<f64> {
@@ -143,7 +320,7 @@ fn calculate_d_prime(data: &ArrayBase<OwnedRepr<f64>, Dim<[usize; 2]>>, varianta
     
     fn find_allele_frequencies(data:&Array2<f64>) -> Array2<f64> {
         let allele_frequencies1 = data.t().sum_axis(Axis(1)); //col sums
-        let allele_frequencies0 = 603f64 - allele_frequencies1.clone();
+        let allele_frequencies0 = 603f64 - &allele_frequencies1;
         let allele_frequencies: ArrayBase<ndarray::OwnedRepr<f64>, Dim<[usize; 2]>> = ndarray::stack![Axis(0), allele_frequencies0, allele_frequencies1];
         let allele_frequencies: ArrayBase<ndarray::OwnedRepr<f64>, Dim<[usize; 2]>> = allele_frequencies.div(603f64);
         return allele_frequencies; //allele_freqs0 in first row, allele_freqs1 in second row
@@ -209,3 +386,4 @@ fn calculate_d_prime(data: &ArrayBase<OwnedRepr<f64>, Dim<[usize; 2]>>, varianta
     }
 
 }
+
