@@ -23,7 +23,7 @@ fn main() {
     println!("Welcome to the LD Pruning Module.");
 
     // Read in data
-    let raw_gt_data = read_csv("3000_gts.csv");
+    let raw_gt_data = read_csv("/nfs/research/jlees/jacqueline/gwas_code/ld_pruning/test_data_new.csv");
     println!("{:?}", raw_gt_data);
     println!("Your data has been successfully read in. Sit tight while we run your analysis.");
 
