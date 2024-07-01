@@ -23,7 +23,7 @@ fn main() {
     println!("Welcome to the LD Pruning Module.");
 
     // Read in data
-    let raw_gt_data = read_csv("/nfs/research/jlees/jacqueline/gwas_code/ld_pruning/test_data_new.csv");
+    let raw_gt_data = read_csv("/nfs/research/jlees/jacqueline/gwas_code/ld_pruning/test_data_new/test_genotypes.csv");
     println!("{:?}", raw_gt_data);
     println!("Your data has been successfully read in. Sit tight while we run your analysis.");
 
@@ -82,7 +82,7 @@ fn read_csv(path_to_file: &str) -> Array2<f64> {
     //1000 cols, 604 rows (incl. headers)
     let file = File::open(path_to_file).expect("File not found :(");
     let mut reader = ReaderBuilder::new().has_headers(true).from_reader(file);
-    reader.deserialize_array2::<f64>((603, 1000)).expect("Failed to unwrap .csv file.")
+    reader.deserialize_array2::<f64>((10, 100)).expect("Failed to unwrap .csv file.")
 }
 
 fn calc_maf(data:&Array2<f64>) -> Array1<f64> {
