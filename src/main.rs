@@ -38,8 +38,6 @@ fn main() -> Result<(), csv::Error> {
     let n_cols = 100;
 
     // Read in data
-    //let raw_gt_data = read_csv("pyseer_complete.csv", n_rows, n_cols);
-    
     let raw_gt_data = read_csv("/nfs/research/jlees/jacqueline/gwas_code/ld_pruning/test_data_new/test_genotypes.csv", n_rows, n_cols);
     println!("{:?}", raw_gt_data);
     println!("Your data has been successfully read in. Sit tight while we run your analysis.");
@@ -138,20 +136,12 @@ fn main() -> Result<(), csv::Error> {
     //The skip index also acts as the record of which variants should be pruned out of the dataset
 
     for i in 0..filtered_gt_data.ncols() {
-        for j in i..filtered_gt_data.ncols() {
-            //when i = j (are the same variant) in the for loops, the snp will prune itself out
-            // hence why needed to add the && i!=j condition
-            if mafs[i] == mafs[j] && i != j && skip_index.contains(&i) == false && skip_index.contains(&j) == false { //inside this loop is one snp vs one snp
-                //sum row of the two SNPs
-                let rowsums_ij = filtered_gt_data.select(Axis(1), &[i,j]).sum_axis(Axis(1));
-                //if any rowsums are equal to 1, then the SNP pair is not in perfect LD (so break)
-                //if no rowsums are 1 (meaning all rowsums are 0 or 2, aka all pairs of individuals are 00 or 11),
-                //then prune one of the snps
-                if rowsums_ij.iter().any(|&i| i==1.0) == true {
-                    break;
-                } else {
-                    //add to skip index (to be pruned)
-                    skip_index.insert(i);
+        for j in i + 1..filtered_gt_data.ncols() {
+            if (mafs[i] - mafs[j]).abs() < 1e-6 && !skip_index.contains(&i) && !skip_index.contains(&j) {
+                let rowsums_ij = filtered_gt_data.select(Axis(1), &[i, j]).sum_axis(Axis(1));
+                if rowsums_ij.iter().all(|&x| x == 0.0 || x == 2.0) {
+                    // SNPs i and j are in perfect LD, prune the one with the second one
+                    skip_index.insert(j); // Prune the second SNP
                 }
             }
         }
@@ -159,8 +149,7 @@ fn main() -> Result<(), csv::Error> {
     
     //turn skip index into keep index (so can use in pruning .select() function)
     //there is probably a better way to do this but this is quick and dirty
-    let skip_index: Vec<_> = skip_index.into_iter().collect();
-    let keep_index: Vec<usize> = (0..filtered_gt_data.ncols()-1).collect::<Vec<_>>().into_iter().filter(|x| skip_index.contains(x) == false).collect::<Vec<usize>>();
+    let keep_index: Vec<usize> = (0..filtered_gt_data.ncols()).filter(|x| !skip_index.contains(x)).collect();
 
     //LD PRUNE PHASE 1
     // Prune the LD=1 variants out!
