@@ -34,13 +34,13 @@ fn main() -> Result<(), csv::Error> {
     env::set_var(key, "/Users/lilyjacqueline/mambaforge/pkgs/gsl-2.7.1-hdbe807d_1/bin/gsl-config");
 */
     //to read in data, need to know the number of rows and columns in your data (including header)
-    let n_rows = 604;
-    let n_cols = 61732;
+    let n_rows = 11;
+    let n_cols = 100;
 
     // Read in data
     //let raw_gt_data = read_csv("pyseer_complete.csv", n_rows, n_cols);
     
-    let raw_gt_data = read_csv("linphen_gts.csv", n_rows, n_cols);
+    let raw_gt_data = read_csv("/nfs/research/jlees/jacqueline/gwas_code/ld_pruning/test_data_new/test_genotypes.csv", n_rows, n_cols);
     println!("{:?}", raw_gt_data);
     println!("Your data has been successfully read in. Sit tight while we run your analysis.");
 
