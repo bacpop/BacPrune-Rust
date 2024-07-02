@@ -28,14 +28,15 @@ fn main() -> Result<(), csv::Error> {
 */
     // Get the input file path, nrows (including header), and ncols from command line arguments
     let args: Vec<String> = env::args().collect(); // Changed: Reading command-line arguments.
-    if args.len() != 5 {
-        println!("Usage: {} <input_file> <n_rows> <n_cols> <maf_cutoff>", args[0]);
+    if args.len() != 6 {
+        println!("Usage: {} <input_file> <n_rows> <n_cols> <maf_cutoff> <output_directory>", args[0]);
         return Ok(());
     }
     let input_file = &args[1];
     let n_rows: usize = args[2].parse().expect("Please provide a valid number for n_rows");
     let n_cols: usize = args[3].parse().expect("Please provide a valid number for n_cols");
     let cutoff: f64 = args[4].parse().expect("Please provide a MAF cutoff (variants with a minor allele frequency below this cutoff will be pruned out)");
+    let outdir = &args[5];
 
     // Read in data
     let raw_gt_data = read_csv(input_file, n_rows, n_cols);
@@ -215,11 +216,14 @@ fn main() -> Result<(), csv::Error> {
     //let string_arr = full_prune_gt_data.map(|e| e.to_string());
     println!("String array: {:?}", string_arr);
 
+    // construct the full path to the results CSV file
+    let csv_path = Path::new(outdir).join("bacprune_rust_results.csv");
+
     let file = OpenOptions::new()
         .write(true)
         .create(true)
         .append(true)
-        .open("bacprune_rust_results.csv")
+        .open(csv_path)
         .unwrap();
     let mut wtr = csv::Writer::from_writer(file);
 
