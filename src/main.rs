@@ -253,7 +253,7 @@ fn main() -> Result<(), csv::Error> {
         .open(rep_snp_path)
         .unwrap();
     let mut wtr = csv::Writer::from_writer(file);
-    wtr.write_record(&["Representative SNP", "Pruned SNPs"]).expect("Error writing header to CSV");
+    wtr.write_record(&["Representative SNP (base 0 indexing)", "Pruned SNPs (base 0 indexing)"]).expect("Error writing header to CSV");
     for (rep_snp, pruned_snps) in rep_snps {
         let rep_snp_str = rep_snp.to_string();
         let pruned_snps_str = pruned_snps.iter().map(|snp| snp.to_string()).collect::<Vec<String>>().join(", ");
