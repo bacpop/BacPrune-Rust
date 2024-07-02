@@ -2,7 +2,6 @@
 // This code currently only prunes for LD=1, as lower-D' pruning isn't required for our GWAS
 
 //libraries:
-use std::{ops::Div};
 use ndarray::prelude::*;
 use ndarray::OwnedRepr;
 use csv::ReaderBuilder;
@@ -36,7 +35,7 @@ fn main() -> Result<(), csv::Error> {
     let input_file = &args[1];
     let n_rows: usize = args[2].parse().expect("Please provide a valid number for n_rows");
     let n_cols: usize = args[3].parse().expect("Please provide a valid number for n_cols");
-    let cutoff: f64 = args[4].parse().expect("Please provide a MAF cutoff (variants with a minor allele frequency below this cutoff will be pruned out)")
+    let cutoff: f64 = args[4].parse().expect("Please provide a MAF cutoff (variants with a minor allele frequency below this cutoff will be pruned out)");
 
     // Read in data
     let raw_gt_data = read_csv(input_file, n_rows, n_cols);
