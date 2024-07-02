@@ -1,25 +1,19 @@
-// Rust prune 4
-
-//NOTE TO SLEF:
-//Remember that Rust indexing starts at 0 - make sure that all frequencies etc. are correctly indexed!!
+// LD Pruning in Rust
+// This code currently only prunes for LD=1, as lower-D' pruning isn't required for our GWAS
 
 //libraries:
 use std::{ops::Div};
-
-//extern crate csv;
 use ndarray::prelude::*;
 use ndarray::OwnedRepr;
-
 use csv::ReaderBuilder;
 use ndarray::Array2;
 use ndarray_rand::rand_distr::num_traits::ToPrimitive;
 use std::fs::File;
 use ndarray_csv::Array2Reader;
-
 use std::cmp::Ordering;
 use std::fs::OpenOptions;
-
 use std::collections::HashSet;
+use std::{env, ops::Div};
 
 //use rgsl::{
 //    randist::t_distribution::{tdist_P, tdist_Q},
@@ -33,12 +27,19 @@ fn main() -> Result<(), csv::Error> {
     let key = "RUSTFLAGS";
     env::set_var(key, "/Users/lilyjacqueline/mambaforge/pkgs/gsl-2.7.1-hdbe807d_1/bin/gsl-config");
 */
-    //to read in data, need to know the number of rows and columns in your data (including header)
-    let n_rows = 11;
-    let n_cols = 100;
+    // Get the input file path, nrows (including header), and ncols from command line arguments
+    let args: Vec<String> = env::args().collect(); // Changed: Reading command-line arguments.
+    if args.len() != 5 {
+        println!("Usage: {} <input_file> <n_rows> <n_cols> <maf_cutoff>", args[0]);
+        return Ok(());
+    }
+    let input_file = &args[1];
+    let n_rows: usize = args[2].parse().expect("Please provide a valid number for n_rows");
+    let n_cols: usize = args[3].parse().expect("Please provide a valid number for n_cols");
+    let cutoff: f64 = args[4].parse().expect("Please provide a MAF cutoff (variants with a minor allele frequency below this cutoff will be pruned out)")
 
     // Read in data
-    let raw_gt_data = read_csv("/nfs/research/jlees/jacqueline/gwas_code/ld_pruning/test_data_new/test_genotypes.csv", n_rows, n_cols);
+    let raw_gt_data = read_csv(input_file, n_rows, n_cols);
     println!("{:?}", raw_gt_data);
     println!("Your data has been successfully read in. Sit tight while we run your analysis.");
 
@@ -50,19 +51,12 @@ fn main() -> Result<(), csv::Error> {
     //concat header with final pruned gt data and export as usual
     //check that the headers match the variants by comparing header+SNP to original dataset's header+SNP (maybe by using match function to find identical columns?)
 
-
-
-
-    //To-do
-    // Automatically find the number of rows and columns (samples and variants) in the df
-
     //Calculate MAF
     let mafs = calc_maf(&raw_gt_data);
     println!("Minor allele frequencies: {:?}", mafs);
     println!("Minor allele frequencies were successfully calculated.");
     
     //Discard variants with MAF below cutoff
-    let cutoff = 0.01f64;
     //let filtered_gt_data = maf_prune(&raw_gt_data, &mafs, &cutoff);
     let (filtered_gt_data, keep_index) = maf_prune(&raw_gt_data, &mafs, &cutoff);
     let gt_header = gt_header.select(Axis(1), keep_index.as_slice());
