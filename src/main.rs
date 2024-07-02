@@ -245,11 +245,12 @@ fn main() -> Result<(), csv::Error> {
     wtr.flush()?;
 
     // Write representative SNPs and pruned SNPs to a new .csv
+    let rep_snp_path = Path::new(outdir).join("ld_pruning_summary.csv");
     let file = OpenOptions::new()
         .write(true)
         .create(true)
         .append(true)
-        .open("ld_pruning_summary.csv")
+        .open(rep_snp_path)
         .unwrap();
     let mut wtr = csv::Writer::from_writer(file);
     wtr.write_record(&["Representative SNP", "Pruned SNPs"]).expect("Error writing header to CSV");
