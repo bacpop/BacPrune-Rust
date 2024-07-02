@@ -255,8 +255,10 @@ fn read_csv(path_to_file: &str, n_rows:usize, n_cols:usize) -> Array2<f64> {
 }
 
 fn calc_maf(data:&Array2<f64>) -> Array1<f64> {
+    let num_individuals = data.nrows() as f64;
+    println!("Number of rows in calc_maf (should equal 10): {:?}", num_individuals);
     let calcmafs: ArrayBase<ndarray::OwnedRepr<f64>, Dim<[usize; 1]>> = data.sum_axis(Axis(0));
-    let calcmafs: ArrayBase<ndarray::OwnedRepr<f64>, Dim<[usize; 1]>> = calcmafs.div(603f64);
+    let calcmafs: ArrayBase<ndarray::OwnedRepr<f64>, Dim<[usize; 1]>> = calcmafs.div(num_individuals);
     return calcmafs;
 }
 
