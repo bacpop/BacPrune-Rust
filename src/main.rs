@@ -124,8 +124,11 @@ fn main() -> Result<(), csv::Error> {
     //2. Pairwise comparison of all individuals checking that there are at least one pair of indivs that is not perfectly 0/0 or 1/1; the second you find that pair, break
     //3. Else (meaning if that pair doesn't exist), then prune out the lower MAF sample (see SNPPrune paper pg.2)
 
-    //Create skip index (using HashSet package for a set)
+    // create skip index (using HashSet package for a set)
     let mut skip_index: HashSet<usize> = HashSet::new();
+    // create index to track SNPs that are pruned out and their representative SNP
+    let mut rep_snps: HashMap<usize, Vec<usize>> = HashMap::new();
+        
     //When a variant is pruned, its index number is added to this set
     //Before trying to compare two variants, the loop first checks that neither is in the index
     //This means that variants that have already been pruned will be skipped over during furture iterations,
@@ -140,6 +143,7 @@ fn main() -> Result<(), csv::Error> {
                     println!("Pruning column {} due to perfect LD with column {}", j, i);
                     // SNPs i and j are in perfect LD, prune the one with the second one
                     skip_index.insert(j); // Prune the second SNP
+                    rep_snps.entry(i).or_insert_with(Vec::new).push(j); // add pruned SNP to representative index
                 }
             }
         }
@@ -239,7 +243,23 @@ fn main() -> Result<(), csv::Error> {
 */
 
     wtr.flush()?;
-    
+
+    // Write representative SNPs and pruned SNPs to a new .csv
+    let file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .append(true)
+        .open("ld_pruning_summary.csv")
+        .unwrap();
+    let mut wtr = csv::Writer::from_writer(file);
+    wtr.write_record(&["Representative SNP", "Pruned SNPs"]).expect("Error writing header to CSV");
+    for (rep_snp, pruned_snps) in rep_snps {
+        let rep_snp_str = rep_snp.to_string();
+        let pruned_snps_str = pruned_snps.iter().map(|snp| snp.to_string()).collect::<Vec<String>>().join(", ");
+        wtr.write_record(&[rep_snp_str, pruned_snps_str]).expect("Error writing record to CSV");
+    }
+    wtr.flush()?;
+
     Ok(())
 
 }
