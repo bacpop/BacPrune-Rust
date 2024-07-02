@@ -58,6 +58,7 @@ fn main() -> Result<(), csv::Error> {
 
     //Calculate MAF
     let mafs = calc_maf(&raw_gt_data);
+    println!("Minor allele frequencies: {:?}", mafs);
     println!("Minor allele frequencies were successfully calculated.");
     
     //Discard variants with MAF below cutoff
@@ -65,6 +66,7 @@ fn main() -> Result<(), csv::Error> {
     //let filtered_gt_data = maf_prune(&raw_gt_data, &mafs, &cutoff);
     let (filtered_gt_data, keep_index) = maf_prune(&raw_gt_data, &mafs, &cutoff);
     let gt_header = gt_header.select(Axis(1), keep_index.as_slice());
+    println!("Kept indices after MAF filtering: {:?}", keep_index);
     println!("Data were successfully filtered by MAF.");
 
     //Update MAF list after discarding variants
@@ -137,9 +139,10 @@ fn main() -> Result<(), csv::Error> {
 
     for i in 0..filtered_gt_data.ncols() {
         for j in i + 1..filtered_gt_data.ncols() {
-            if (mafs[i] - mafs[j]).abs() < 1e-6 && !skip_index.contains(&i) && !skip_index.contains(&j) {
+            if (mafs[i] - mafs[j]).abs() < 1e-6 && (i != j) && !skip_index.contains(&i) && !skip_index.contains(&j) {
                 let rowsums_ij = filtered_gt_data.select(Axis(1), &[i, j]).sum_axis(Axis(1));
                 if rowsums_ij.iter().all(|&x| x == 0.0 || x == 2.0) {
+                    println!("Pruning column {} due to perfect LD with column {}", j, i);
                     // SNPs i and j are in perfect LD, prune the one with the second one
                     skip_index.insert(j); // Prune the second SNP
                 }
@@ -148,8 +151,8 @@ fn main() -> Result<(), csv::Error> {
     }
     
     //turn skip index into keep index (so can use in pruning .select() function)
-    //there is probably a better way to do this but this is quick and dirty
     let keep_index: Vec<usize> = (0..filtered_gt_data.ncols()).filter(|x| !skip_index.contains(x)).collect();
+    println!("Kept indices after LD pruning phase 1: {:?}", keep_index);
 
     //LD PRUNE PHASE 1
     // Prune the LD=1 variants out!
@@ -375,4 +378,3 @@ fn calculate_d_prime(data: &ArrayBase<OwnedRepr<f64>, Dim<[usize; 2]>>, varianta
     }
 
 }
-
