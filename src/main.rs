@@ -11,7 +11,7 @@ use std::fs::File;
 use ndarray_csv::Array2Reader;
 use std::cmp::Ordering;
 use std::fs::OpenOptions;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::{env, ops::Div};
 use std::path::Path;
 
