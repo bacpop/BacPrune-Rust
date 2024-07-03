@@ -41,7 +41,6 @@ fn main() -> Result<(), csv::Error> {
 
     // Read in data
     let raw_gt_data = read_csv(input_file, n_rows, n_cols);
-    println!("{:?}", raw_gt_data);
     println!("Your data has been successfully read in. Sit tight while we run your analysis.");
 
     //turn "has headers" to false in read.csv function, copy header into seperate vector, then remove it from gt (just remove first row)
@@ -54,14 +53,12 @@ fn main() -> Result<(), csv::Error> {
 
     //Calculate MAF
     let mafs = calc_maf(&raw_gt_data);
-    println!("Minor allele frequencies: {:?}", mafs);
     println!("Minor allele frequencies were successfully calculated.");
     
     //Discard variants with MAF below cutoff
     //let filtered_gt_data = maf_prune(&raw_gt_data, &mafs, &cutoff);
     let (filtered_gt_data, keep_index) = maf_prune(&raw_gt_data, &mafs, &cutoff);
     let gt_header = gt_header.select(Axis(1), keep_index.as_slice());
-    println!("Kept indices after MAF filtering: {:?}", keep_index);
     println!("Data were successfully filtered by MAF.");
 
     //Update MAF list after discarding variants
@@ -151,7 +148,6 @@ fn main() -> Result<(), csv::Error> {
     
     //turn skip index into keep index (so can use in pruning .select() function)
     let keep_index: Vec<usize> = (0..filtered_gt_data.ncols()).filter(|x| !skip_index.contains(x)).collect();
-    println!("Kept indices after LD pruning phase 1: {:?}", keep_index);
 
     //LD PRUNE PHASE 1
     // Prune the LD=1 variants out!
@@ -219,7 +215,6 @@ fn main() -> Result<(), csv::Error> {
 
     let string_arr = ldbelow1_gt_data.map(|e| e.to_string());
     //let string_arr = full_prune_gt_data.map(|e| e.to_string());
-    println!("String array: {:?}", string_arr);
 
     // construct the full path to the results CSV file
     let csv_path = Path::new(outdir).join("bacprune_rust_results.csv");
@@ -275,7 +270,6 @@ fn read_csv(path_to_file: &str, n_rows:usize, n_cols:usize) -> Array2<f64> {
 
 fn calc_maf(data:&Array2<f64>) -> Array1<f64> {
     let num_individuals = data.nrows() as f64;
-    println!("Number of rows in calc_maf (should equal 10): {:?}", num_individuals);
     let calcmafs: ArrayBase<ndarray::OwnedRepr<f64>, Dim<[usize; 1]>> = data.sum_axis(Axis(0));
     let calcmafs: ArrayBase<ndarray::OwnedRepr<f64>, Dim<[usize; 1]>> = calcmafs.div(num_individuals);
     return calcmafs;
