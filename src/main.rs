@@ -137,7 +137,7 @@ fn main() -> Result<(), csv::Error> {
             if (mafs[i] - mafs[j]).abs() < 1e-6 && (i != j) && !skip_index.contains(&i) && !skip_index.contains(&j) {
                 let rowsums_ij = filtered_gt_data.select(Axis(1), &[i, j]).sum_axis(Axis(1));
                 if rowsums_ij.iter().all(|&x| x == 0.0 || x == 2.0) {
-                    println!("Pruning column {} due to perfect LD with column {}", j, i);
+                    // println!("Pruning column {} due to perfect LD with column {}", j, i);
                     // SNPs i and j are in perfect LD, prune the one with the second one
                     skip_index.insert(j); // Prune the second SNP
                     rep_snps.entry(i).or_insert_with(Vec::new).push(j); // add pruned SNP to representative index
