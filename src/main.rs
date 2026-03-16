@@ -214,7 +214,7 @@ fn write_outputs(
     let final_data = ndarray::concatenate![Axis(0), *header, *data];
     let string_arr = final_data.map(|e| e.to_string());
     let csv_path   = Path::new(outdir).join("bacprune_rust_results.csv");
-    let file = OpenOptions::new().write(true).create(true).append(true).open(csv_path).unwrap();
+    let file = OpenOptions::new().write(true).create(true).truncate(true).open(csv_path).unwrap();
     let mut wtr = csv::Writer::from_writer(file);
     for i in 0..final_data.nrows() {
         wtr.write_record(&string_arr.slice(s![i, ..])).expect("Error writing to CSV");
@@ -228,7 +228,7 @@ fn write_outputs(
         rep_snps.entry(rep).or_insert_with(Vec::new).push(pruned);
     }
     let summary_path = Path::new(outdir).join("ld_pruning_summary.csv");
-    let file = OpenOptions::new().write(true).create(true).append(true).open(summary_path).unwrap();
+    let file = OpenOptions::new().write(true).create(true).truncate(true).open(summary_path).unwrap();
     let mut wtr = csv::Writer::from_writer(file);
     wtr.write_record(&["Representative SNP (base 0 indexing)", "Pruned SNPs (base 0 indexing)"])
         .expect("Error writing summary header");
@@ -245,7 +245,7 @@ fn write_outputs(
     //   "positive_correlation" — variant was pruned; genotype matches its representative (r > 0)
     //   "negative_correlation" — variant was pruned; genotype is the complement of its rep (r < 0)
     let direction_path = Path::new(outdir).join("direction_of_correlation.csv");
-    let file = OpenOptions::new().write(true).create(true).append(true).open(direction_path).unwrap();
+    let file = OpenOptions::new().write(true).create(true).truncate(true).open(direction_path).unwrap();
     let mut wtr = csv::Writer::from_writer(file);
     wtr.write_record(&["Variant", "Status", "Representative Variant"])
         .expect("Error writing direction header");
@@ -282,8 +282,14 @@ fn read_csv(path_to_file: &str, n_rows: usize, n_cols: usize) -> Array2<f64> {
     reader.deserialize_array2::<f64>((n_rows, n_cols)).expect("Failed to parse CSV as f64 array.")
 }
 
-/// Compute the minor allele frequency (MAF) for every variant (column).
-/// For a haploid 0/1 matrix this is simply the mean of each column.
+/// Compute the allele frequency for every variant (column).
+/// For a haploid 0/1 matrix this is simply the mean of each column,
+/// i.e. the frequency of the allele encoded as 1.
+///
+/// The MAF filter therefore operates on the frequency of whatever allele is
+/// encoded as 1.  To filter out both rare ALT and rare REF alleles, normalise
+/// the input so that the alternate allele is always 1 and the reference allele
+/// is always 0 before running BacPrune.
 /// Returns a 1-D array of length n_cols.
 fn calc_maf(data: &Array2<f64>) -> Array1<f64> {
     data.sum_axis(Axis(0)).div(data.nrows() as f64)

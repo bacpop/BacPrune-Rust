@@ -113,6 +113,9 @@ Example (3 samples, 4 variants, numeric header):
 
 `n_rows` must include the header row (so a file with 3 samples has `n_rows = 4`).
 
+> [!NOTE]
+> The MAF filter operates on the frequency of the allele encoded as `1`. This means it removes variants where the alternate allele is rare, but will not remove variants where the *reference* allele is rare (i.e. high-frequency alternates). To filter out both rare ALT and rare REF alleles, normalise your input so that the alternate allele is always `1` and the reference allele is always `0` before running BacPrune.
+
 ### Examples
 
 ```bash
