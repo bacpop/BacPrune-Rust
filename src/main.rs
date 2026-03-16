@@ -22,7 +22,6 @@ use csv::ReaderBuilder;
 use ndarray::Array2;
 use std::fs::File;
 use ndarray_csv::Array2Reader;
-use std::cmp::Ordering;
 use std::fs::OpenOptions;
 use std::collections::{HashMap, HashSet};
 use std::ops::Div;
@@ -303,26 +302,6 @@ fn maf_prune(data: &Array2<f64>, mafs: &Array1<f64>, cutoff: &f64) -> (Array2<f6
     (data.select(Axis(1), &keep), keep)
 }
 
-/// Reorder the columns of `data` in ascending MAF order.
-/// NaN MAF values are sorted to the end.
-fn sort_by_maf(mafs: &Array1<f64>, data: &Array2<f64>) -> Array2<f64> {
-    return data.select(Axis(1), sort_indices(mafs).as_slice());
-
-    /// Returns column indices sorted so that arr[idx[0]] ≤ arr[idx[1]] ≤ …
-    /// NaN values are placed last.
-    fn sort_indices(arr: &Array1<f64>) -> Vec<usize> {
-        let mut idx = (0..arr.len()).collect::<Vec<usize>>();
-        idx.sort_by(|&a, &b| {
-            match (arr[a].is_nan(), arr[b].is_nan()) {
-                (true,  true)  => Ordering::Equal,
-                (true,  false) => Ordering::Greater,
-                (false, true)  => Ordering::Less,
-                (false, false) => arr[a].partial_cmp(&arr[b]).unwrap(),
-            }
-        });
-        idx
-    }
-}
 
 /// Hash-based exact duplicate removal — O(n·v), no pairwise comparisons.
 ///
@@ -499,25 +478,6 @@ mod tests {
         let (filtered, keep_idx) = maf_prune(&data, &mafs, &0.01);
         assert_eq!(filtered.ncols(), 2);
         assert_eq!(keep_idx, vec![0, 2]);
-    }
-
-    // ── sort_by_maf ──────────────────────────────────────────────────────────
-
-    #[test]
-    fn test_sort_by_maf_ascending() {
-        let data = array![[1.0, 0.0, 1.0], [1.0, 1.0, 0.0]];
-        let mafs = array![0.9, 0.1, 0.5];
-        let sorted = sort_by_maf(&mafs, &data);
-        assert_eq!(sorted.column(0).to_vec(), data.column(1).to_vec());
-        assert_eq!(sorted.column(1).to_vec(), data.column(2).to_vec());
-        assert_eq!(sorted.column(2).to_vec(), data.column(0).to_vec());
-    }
-
-    #[test]
-    fn test_sort_by_maf_already_sorted() {
-        let data = array![[0.0, 1.0, 1.0], [0.0, 0.0, 1.0]];
-        let mafs = array![0.0, 0.5, 1.0];
-        assert_eq!(sort_by_maf(&mafs, &data), data);
     }
 
     // ── dedup_variants ───────────────────────────────────────────────────────
