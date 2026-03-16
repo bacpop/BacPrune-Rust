@@ -1,19 +1,17 @@
 [package]
-name = "bacprune"
-version = "0.1.0"
-edition = "2021"
+name        = "bacprune"
+version     = "0.9.0"
+edition     = "2021"
 description = "Fast LD pruning of haploid genotype matrices"
+keywords    = ["bioinformatics", "genomics", "ld-pruning", "gwas", "population-genetics"]
+categories  = ["science", "command-line-utilities"]
+readme      = "README.md"
 
 [[bin]]
 name = "bacprune"
 path = "src/main.rs"
 
 [dependencies]
-csv = "1.1"
-polars = { version = "0.28.0", features = ["lazy"] }
-ndarray = "0.15.6"
-ndarray-rand = "0.14.0"
-ndarray-stats = "0.5.1"
-noisy_float = "0.2.0"
-poloto = "18.0.6"
+csv         = "1.1"
+ndarray     = "0.15.6"
 ndarray-csv = "0.5.1"
