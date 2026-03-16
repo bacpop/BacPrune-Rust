@@ -11,37 +11,26 @@ BacPrune-Rust is a self-contained compiled binary with no runtime dependencies. 
 ### Installing with conda (recommended)
 
 BacPrune-Rust is available on the bioconda channel. Install into an existing environment:
-
 ```
 conda install -c bioconda bacprune
 ```
-
 or create a new dedicated environment (recommended):
-
 ```
 conda create -n bacprune -c bioconda bacprune
 ```
 
-### Installing with pip
-
-```
-pip install bacprune
-bacprune --version
-```
-
 ### Building from source
+
+To build from source (requires Rust ≥ 1.78, stable toolchain, edition 2021), run the following:
 
 ```
 git clone https://github.com/bacpop/BacPrune-Rust
 cd BacPrune-Rust
 cargo build --release
 ```
-
 The compiled binary will be located at `target/release/bacprune`.
 
-### Installing Python package from source
-
-To install the Python package from source (requires Rust ≥ 1.78 and [maturin](https://github.com/PyO3/maturin)):
+You can also install the Python package from source using [pip](https://pip.pypa.io/en/stable/getting-started/) (requires Rust ≥ 1.78 and [maturin](https://github.com/PyO3/maturin)):
 
 ```
 git clone https://github.com/bacpop/BacPrune-Rust
@@ -52,18 +41,7 @@ pip install .
 
 ## Usage
 
-BacPrune offers three modes: pruning by D' score, pruning by Pearson r, and pruning only variants with identical presence and absence (perfect positive correlation). D' score is recommended for use in GWAS applications where LD pruning is used to reduce nonidentifiability arising from correlations between variants, as this will prune both strong positive and strong negative correlations.
-
-```
-# remove by D' or r threshold
-bacprune <input_file> <n_rows> <n_cols> <maf_cutoff> <output_directory> --ld <threshold> [--r|--dprime]
-
-# only remove variants with identical presence/absence
-bacprune <input_file> <n_rows> <n_cols> <maf_cutoff> <output_directory> --dedup
-```
-
-> [!TIP]
-> `n_rows` includes the header row
+BacPrune offers three modes: pruning by D' score, pruning by Pearson r, and pruning only variants with identical presence and absence (perfect positive correlation) which is determined by variant hashes. D' score is recommended for use in GWAS applications where LD pruning is used to reduce nonidentifiability arising from correlations between variants, as this will prune both strong positive and strong negative correlations.
 
 ```
 Usage: bacprune [OPTIONS] <INPUT_FILE> <N_ROWS> <N_COLS> <MAF_CUTOFF> <OUTPUT_DIRECTORY>
@@ -84,37 +62,36 @@ Options:
   -V, --version         Print version
 ```
 
-### Input format
+> [!TIP]
+> `n_rows` includes the header row
 
-A CSV of numeric values. The first row is a header of (numeric) variant identifiers; subsequent rows are samples, with values `0` (reference) or `1` (alternate allele).
+### Formatting the genotype matrix
 
-```
-1,2,3,4
-0,1,0,1
-1,1,0,0
-0,0,1,1
-```
+The genotype matrix should be in CSV format, with the first row being a header of (integer) variant IDs, and subsequent rows being samples with values `0` (reference) or `1` (alternate allele).
 
 > [!NOTE]
-> The MAF filter operates on the frequency of the allele encoded as `1`. This means it removes variants where the alternate allele is rare, but will not remove variants where the *reference* allele is rare. To filter out both rare ALT and rare REF alleles, normalise your input so that the alternate allele is always `1` and the reference allele is always `0` before running BacPrune.
+> MAF filtering operates on the frequency of the allele encoded as `1`; thus, a variant with an allele encoded as `0` that is below the MAF threshold will never be filtered. If you wish to filter low-frequency reference alleles, normalize your genotype matrix so that the alternate allele is always `1` and the reference allele is always `0`.
 
 ### Example Commands
 
 ```
-bacprune genotypes.csv 613 87092 0.05 ./results --ld 1           # D' (default) pruning for D'=1, filter variants with MAF<5%
-bacprune genotypes.csv 613 87092 0 ./results --ld 0.8 --r        # Pearson r pruning for |r|≥0.8, no MAF filtering
-bacprune genotypes.csv 613 87092 0.01 ./results --dedup          # exact duplicates only, filter variants with MAF<1%
+# D' (default) pruning for D'=1, filter variants with MAF<5%
+bacprune genotypes.csv 613 87092 0.05 ./results --ld 1
+
+# Pearson r pruning for |r|≥0.8, no MAF filtering
+bacprune genotypes.csv 613 87092 0 ./results --ld 0.8 --r
+
+# exact duplicates only, filter variants with MAF<1%
+bacprune genotypes.csv 613 87092 0.01 ./results --dedup 
 ```
 
 ## Output files
 
 All files are written to `<output_directory>`.
 
-**`bacprune_rust_results.csv`** — pruned genotype matrix in the same format as the input.
-
-**`ld_pruning_summary.csv`** — one row per representative SNP, listing the post-MAF-filter column indices (base 0) of all variants pruned from its group.
-
-**`direction_of_correlation.csv`** — one row per post-MAF variant. `Status` is `representative`, `positive_correlation` (identical genotype pattern, r > 0), or `negative_correlation` (complement pattern, r < 0).
+- `bacprune_rust_results.csv`: pruned genotype matrix in the same format as the input
+- `ld_pruning_summary.csv`: one row per representative SNP, listing the post-MAF-filter column indices (base 0) of all variants pruned from its group
+- `direction_of_correlation.csv`: one row per post-MAF variant; `Status` is `representative`, `positive_correlation` (identical genotype pattern, r > 0), or `negative_correlation` (complement pattern, r < 0)
 
 ## Algorithm
 
