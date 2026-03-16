@@ -41,7 +41,9 @@ pip install .
 
 ## Usage
 
-BacPrune offers three modes: pruning by r² (Pearson r-squared), pruning by |D'| (Lewontin's D'), and pruning only variants with identical presence and absence (perfect positive correlation) which is determined by variant hashes. r² is the default and is commonly used for LD pruning in GWAS. D' is an alternative that captures both strong positive and strong negative correlations and may be preferred when the direction of correlation matters.
+BacPrune offers three modes: pruning by r² (Pearson r-squared), pruning by |D'| (Lewontin's D'), and pruning only variants with identical presence and absence (perfect positive correlation) as determined by variant hashes.
+
+r² is the default and is recommended for use in GWAS applications where LD pruning is used to reduce nonidentifiability arising from correlations between predictors, as it will prune strong positive and negative correlations without pruning weakly-correlated variants (which |D'| may).
 
 ```
 Usage: bacprune [OPTIONS] <INPUT_FILE> <N_ROWS> <N_COLS> <MAF_CUTOFF> <OUTPUT_DIRECTORY>
@@ -81,7 +83,7 @@ bacprune genotypes.csv 613 87092 0.05 ./results --ld 0.8
 # D' pruning for |D'|=1, filter variants with MAF<5%
 bacprune genotypes.csv 613 87092 0.05 ./results --ld 1 --dprime
 
-# exact duplicates only, filter variants with MAF<1%
+# prune exact duplicates only, filter variants with MAF<1%
 bacprune genotypes.csv 613 87092 0.01 ./results --dedup 
 ```
 
