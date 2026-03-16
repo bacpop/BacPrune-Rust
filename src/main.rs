@@ -4,9 +4,9 @@
 //   Phase 1 (all modes): hash-based exact duplicate removal — O(n·v), no pairwise work.
 //   Phase 2 (--r / --dprime): greedy pairwise pruning by an LD threshold.
 //
-// Method flags (choose one; default is --r):
-//   --r       Prune by |Pearson r| threshold          (default)
-//   --dprime  Prune by |D'| threshold
+// Method flags (choose one; default is --dprime):
+//   --dprime  Prune by |D'| threshold                 (default)
+//   --r       Prune by |Pearson r| threshold
 //   --dedup   Phase 1 only — remove exact duplicates, skip threshold pruning
 //
 // Output files (written to <output_directory>):
@@ -15,6 +15,7 @@
 //   direction_of_correlation.csv   — per-variant status and correlation direction
 //                                    relative to its representative
 
+use clap::Parser;
 use ndarray::prelude::*;
 use ndarray::OwnedRepr;
 use csv::ReaderBuilder;
@@ -24,8 +25,60 @@ use ndarray_csv::Array2Reader;
 use std::cmp::Ordering;
 use std::fs::OpenOptions;
 use std::collections::{HashMap, HashSet};
-use std::{env, ops::Div};
+use std::ops::Div;
 use std::path::Path;
+
+/// Fast LD pruning of haploid genotype matrices.
+///
+/// Pruning runs in two phases:
+///
+///   Phase 1 (all modes): hash-based exact duplicate removal — O(n·v), no pairwise work.
+///
+///   Phase 2 (--r / --dprime): greedy pairwise pruning by an LD threshold.
+///
+/// Output files written to <output_directory>:
+///
+///   bacprune_rust_results.csv     — pruned genotype matrix
+///
+///   ld_pruning_summary.csv        — representative SNP → pruned SNPs
+///
+///   direction_of_correlation.csv  — per-variant correlation direction
+#[derive(Parser)]
+#[command(name = "bacprune", version, about, long_about = None)]
+struct Cli {
+    /// Path to the input CSV (numeric header row + sample rows of 0/1 genotypes)
+    input_file: String,
+
+    /// Total number of rows in the CSV including the header row
+    n_rows: usize,
+
+    /// Number of columns in the CSV
+    n_cols: usize,
+
+    /// Minor allele frequency cutoff; variants below this threshold are removed
+    maf_cutoff: f64,
+
+    /// Directory where output files are written
+    output_directory: String,
+
+    /// LD pruning threshold; pairs at or above this value are pruned.
+    /// Required for --r and --dprime; not used with --dedup.
+    #[arg(long, value_name = "THRESHOLD", required_unless_present = "dedup",
+          conflicts_with = "dedup")]
+    ld: Option<f64>,
+
+    /// Prune by |Pearson r| threshold
+    #[arg(long, conflicts_with_all = ["dprime", "dedup"])]
+    r: bool,
+
+    /// Prune by |D'| (Lewontin's D') threshold [default method]
+    #[arg(long, conflicts_with_all = ["r", "dedup"])]
+    dprime: bool,
+
+    /// Remove exact duplicate variants only via hashing; no pairwise LD calculation
+    #[arg(long, conflicts_with_all = ["r", "dprime", "ld"])]
+    dedup: bool,
+}
 
 #[derive(PartialEq)]
 enum Method { Correlation, DPrime, DedupOnly }
@@ -37,51 +90,24 @@ enum Method { Correlation, DPrime, DedupOnly }
 type DirectionMap = HashMap<usize, (usize, bool)>;
 
 fn main() -> Result<(), csv::Error> {
+    let cli = Cli::parse();
+
     println!("Welcome to the LD Pruning Module.");
 
-    let args: Vec<String> = env::args().collect();
-
-    // Determine method from flags present anywhere in the argument list
-    let method = if args.contains(&"--dprime".to_string()) {
-        Method::DPrime
-    } else if args.contains(&"--dedup".to_string()) {
+    let method = if cli.dedup {
         Method::DedupOnly
+    } else if cli.r {
+        Method::Correlation
     } else {
-        Method::Correlation // default (also triggered by --r)
+        Method::DPrime // default (also triggered by --dprime)
     };
 
-    // Positional args differ: --dedup doesn't need an ld_threshold
-    let (input_file, n_rows, n_cols, maf_cutoff, ld_threshold, outdir) = match method {
-        Method::DedupOnly => {
-            // --dedup: 5 positional args (no ld_threshold needed)
-            let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
-            if positional.len() != 6 {
-                eprintln!(
-                    "Usage: bacprune <input_file> <n_rows> <n_cols> <maf_cutoff> <output_directory> --dedup"
-                );
-                return Ok(());
-            }
-            (positional[1].clone(), positional[2].clone(), positional[3].clone(),
-             positional[4].clone(), "0".to_string(), positional[5].clone())
-        }
-        _ => {
-            // --r / --dprime: 6 positional args (ld_threshold required)
-            let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
-            if positional.len() != 7 {
-                eprintln!(
-                    "Usage: bacprune <input_file> <n_rows> <n_cols> <maf_cutoff> <ld_threshold> <output_directory> [--r|--dprime]"
-                );
-                return Ok(());
-            }
-            (positional[1].clone(), positional[2].clone(), positional[3].clone(),
-             positional[4].clone(), positional[5].clone(), positional[6].clone())
-        }
-    };
-
-    let n_rows: usize     = n_rows.parse().expect("n_rows must be a positive integer");
-    let n_cols: usize     = n_cols.parse().expect("n_cols must be a positive integer");
-    let maf_cutoff: f64   = maf_cutoff.parse().expect("maf_cutoff must be a float (e.g. 0.01)");
-    let ld_threshold: f64 = ld_threshold.parse().unwrap_or(0.0);
+    let input_file   = cli.input_file;
+    let n_rows: usize     = cli.n_rows;
+    let n_cols: usize     = cli.n_cols;
+    let maf_cutoff: f64   = cli.maf_cutoff;
+    let ld_threshold: f64 = cli.ld.unwrap_or(0.0);
+    let outdir            = cli.output_directory;
 
     match method {
         Method::Correlation => println!("Method: |r|   threshold >= {ld_threshold}"),

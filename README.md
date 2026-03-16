@@ -60,9 +60,11 @@ cargo build --release
 ## Usage
 
 ```
-bacprune <input_file> <n_rows> <n_cols> <maf_cutoff> <ld_threshold> <output_directory> [--r|--dprime]
+bacprune <input_file> <n_rows> <n_cols> <maf_cutoff> <output_directory> --ld <threshold> [--r|--dprime]
 bacprune <input_file> <n_rows> <n_cols> <maf_cutoff> <output_directory> --dedup
 ```
+
+Run `bacprune --help` for full usage or `bacprune --version` to check the installed version.
 
 ### Positional arguments
 
@@ -72,30 +74,37 @@ bacprune <input_file> <n_rows> <n_cols> <maf_cutoff> <output_directory> --dedup
 | `n_rows`             | Total number of rows in the CSV **including the header row** |
 | `n_cols`             | Number of columns |
 | `maf_cutoff`         | Minor allele frequency cutoff; variants below this threshold are removed before LD pruning |
-| `ld_threshold`       | LD pruning threshold; pairs at or above this value are pruned (not required for `--dedup`) |
 | `output_directory`   | Directory where output files are written |
+
+### Options
+
+| Option              | Description |
+|---------------------|-------------|
+| `--ld <threshold>`  | LD pruning threshold; pairs at or above this value are pruned. Required for `--r` and `--dprime`; not used with `--dedup` |
+| `--help` / `-h`     | Print help |
+| `--version` / `-V`  | Print version |
 
 ### Method flags
 
-Choose one; the default when no flag is given is `--r`.
+Choose one; the default when no flag is given is `--dprime`.
 
-| Flag       | LD metric | Pairwise? | `ld_threshold` required? |
-|------------|-----------|-----------|--------------------------|
-| `--r`      | \|Pearson r\| | Yes | Yes |
+| Flag       | LD metric | Pairwise? | `--ld` required? |
+|------------|-----------|-----------|-----------------|
 | `--dprime` | \|D'\| | Yes | Yes |
+| `--r`      | \|Pearson r\| | Yes | Yes |
 | `--dedup`  | Exact hash match | No (O(n·v)) | No |
 
 ### Examples
 
 ```bash
-# Prune with |r| >= 0.8  (default method)
-bacprune genotypes.csv 604 1000 0.01 0.8 ./results
+# Prune with |D'| >= 0.95  (default method)
+bacprune genotypes.csv 604 1000 0.01 ./results --ld 0.95
 
-# Prune with |r| >= 0.8  (explicit flag)
-bacprune genotypes.csv 604 1000 0.01 0.8 ./results --r
+# Prune with |D'| >= 0.95  (explicit flag)
+bacprune genotypes.csv 604 1000 0.01 ./results --ld 0.95 --dprime
 
-# Prune with |D'| >= 0.95
-bacprune genotypes.csv 604 1000 0.01 0.95 ./results --dprime
+# Prune with |r| >= 0.8
+bacprune genotypes.csv 604 1000 0.01 ./results --ld 0.8 --r
 
 # Remove exact duplicate variants only (no LD threshold)
 bacprune genotypes.csv 604 1000 0.01 ./results --dedup
