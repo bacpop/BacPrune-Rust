@@ -1,6 +1,6 @@
 # BacPrune-Rust
 
-BacPrune-Rust performs linkage disequilibrium (LD) pruning for haploid genotype matrices using D' and r scores. It was written in Rust and designed to scale to matrices with millions of variants, such as the CRyPTIC Consortium _M. tuberculosis_ dataset.
+BacPrune-Rust performs linkage disequilibrium (LD) pruning for haploid genotype matrices using D' and r scores with optional additional filtering by minor allele frequency (MAF). Written in Rust and designed to scale to matrices with millions of variants and thousands of isolates, such as the complete CRyPTIC Consortium _M. tuberculosis_ dataset.
 
 ## Installation
 
@@ -31,7 +31,7 @@ bacprune --version
 
 ### Building from source
 
-```bash
+```
 git clone https://github.com/bacpop/BacPrune-Rust
 cd BacPrune-Rust
 cargo build --release
@@ -52,33 +52,41 @@ pip install .
 
 ## Usage
 
-Three modes are available. D' is recommended for GWAS applications as it prunes both positive and negative correlations.
+BacPrune offers three modes: pruning by D' score, pruning by Pearson r, and pruning only variants with identical presence and absence (perfect positive correlation). D' score is recommended for use in GWAS applications where LD pruning is used to reduce nonidentifiability arising from correlations between variants, as this will prune both strong positive and strong negative correlations.
 
 ```
+# remove by D' or r threshold
 bacprune <input_file> <n_rows> <n_cols> <maf_cutoff> <output_directory> --ld <threshold> [--r|--dprime]
+
+# only remove variants with identical presence/absence
 bacprune <input_file> <n_rows> <n_cols> <maf_cutoff> <output_directory> --dedup
 ```
 
-| Argument | Description |
-|----------|-------------|
-| `input_file` | Path to input CSV |
-| `n_rows` | Number of rows **including the header row** |
-| `n_cols` | Number of columns |
-| `maf_cutoff` | Variants with allele frequency below this are removed |
-| `output_directory` | Directory for output files |
-| `--ld <threshold>` | Prune pairs at or above this score (required for `--r`/`--dprime`) |
+> [!TIP]
+`n_rows` includes the header row
 
-| Flag | Method | `--ld` required? |
-|------|--------|-----------------|
-| `--dprime` | \|D'\| — default | Yes |
-| `--r` | \|Pearson r\| | Yes |
-| `--dedup` | Exact hash match only | No |
+```
+Usage: bacprune [OPTIONS] <INPUT_FILE> <N_ROWS> <N_COLS> <MAF_CUTOFF> <OUTPUT_DIRECTORY>
 
-Run `bacprune --help` for full usage.
+Arguments:
+  <INPUT_FILE>        Path to the input CSV (numeric header row + sample rows of 0/1 genotypes)
+  <N_ROWS>            Total number of rows in the CSV including the header row
+  <N_COLS>            Number of columns in the CSV
+  <MAF_CUTOFF>        Minor allele frequency cutoff; variants below this threshold are removed
+  <OUTPUT_DIRECTORY>  Directory where output files are written
+
+Options:
+      --ld <THRESHOLD>  LD pruning threshold; pairs at or above this value are pruned. Required for --r and --dprime; not used with --dedup
+      --r               Prune by |Pearson r| threshold
+      --dprime          Prune by |D'| (Lewontin's D') threshold [default method]
+      --dedup           Remove exact duplicate variants only via hashing; no pairwise LD calculation
+  -h, --help            Print help
+  -V, --version         Print version
+```
 
 ### Input format
 
-A CSV where every value is numeric (f64). The first row is a header of variant identifiers; subsequent rows are samples, with values `0` (reference) or `1` (alternate allele).
+A CSV of numeric values. The first row is a header of (numeric) variant identifiers; subsequent rows are samples, with values `0` (reference) or `1` (alternate allele).
 
 ```
 1,2,3,4
@@ -87,17 +95,15 @@ A CSV where every value is numeric (f64). The first row is a header of variant i
 0,0,1,1
 ```
 
-`n_rows` includes the header (3 samples → `n_rows = 4`).
-
 > [!NOTE]
-> The MAF filter operates on the frequency of the allele encoded as `1`. This means it removes variants where the alternate allele is rare, but will not remove variants where the *reference* allele is rare (i.e. high-frequency alternates). To filter out both rare ALT and rare REF alleles, normalise your input so that the alternate allele is always `1` and the reference allele is always `0` before running BacPrune.
+> The MAF filter operates on the frequency of the allele encoded as `1`. This means it removes variants where the alternate allele is rare, but will not remove variants where the *reference* allele is rare. To filter out both rare ALT and rare REF alleles, normalise your input so that the alternate allele is always `1` and the reference allele is always `0` before running BacPrune.
 
-### Examples
+### Example Commands
 
-```bash
-bacprune genotypes.csv 604 1000 0.01 ./results --ld 0.95           # D' (default)
-bacprune genotypes.csv 604 1000 0.01 ./results --ld 0.8 --r        # Pearson r
-bacprune genotypes.csv 604 1000 0.01 ./results --dedup             # exact duplicates only
+```
+bacprune genotypes.csv 613 87092 0.05 ./results --ld 1           # D' (default) pruning for D'=1, filter samples with MAF<5%
+bacprune genotypes.csv 613 87092 0 ./results --ld 0.8 --r        # Pearson r pruning for r>0.8, no MAF filtering
+bacprune genotypes.csv 613 87092 0.01 ./results --dedup          # exact duplicates only, filter samples with MAF<1%
 ```
 
 ## Output files
