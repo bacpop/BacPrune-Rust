@@ -1,9 +1,12 @@
 [package]
-name = "rust_prune_4"
+name = "bacprune"
 version = "0.1.0"
 edition = "2021"
+description = "Fast LD pruning of haploid genotype matrices"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[[bin]]
+name = "bacprune"
+path = "src/main.rs"
 
 [dependencies]
 csv = "1.1"

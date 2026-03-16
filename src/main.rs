@@ -1,7 +1,20 @@
-// LD Pruning in Rust
-// This code currently only prunes for LD=1, as lower-D' pruning isn't required for our GWAS
+// BacPrune-Rust — LD pruning of haploid genotype matrices
+//
+// Pruning runs in two phases:
+//   Phase 1 (all modes): hash-based exact duplicate removal — O(n·v), no pairwise work.
+//   Phase 2 (--r / --dprime): greedy pairwise pruning by an LD threshold.
+//
+// Method flags (choose one; default is --r):
+//   --r       Prune by |Pearson r| threshold          (default)
+//   --dprime  Prune by |D'| threshold
+//   --dedup   Phase 1 only — remove exact duplicates, skip threshold pruning
+//
+// Output files (written to <output_directory>):
+//   bacprune_rust_results.csv      — pruned genotype matrix with header
+//   ld_pruning_summary.csv         — representative SNP → list of pruned SNPs
+//   direction_of_correlation.csv   — per-variant status and correlation direction
+//                                    relative to its representative
 
-//libraries:
 use ndarray::prelude::*;
 use ndarray::OwnedRepr;
 use csv::ReaderBuilder;
@@ -14,223 +27,397 @@ use std::collections::{HashMap, HashSet};
 use std::{env, ops::Div};
 use std::path::Path;
 
+#[derive(PartialEq)]
+enum Method { Correlation, DPrime, DedupOnly }
+
+/// Maps a pruned variant's post-MAF column index to
+/// (representative's post-MAF column index, is_positive_correlation).
+/// Positive means the pruned variant is identical to its representative (r > 0);
+/// negative means it is complementary / opposite (r < 0).
+type DirectionMap = HashMap<usize, (usize, bool)>;
+
 fn main() -> Result<(), csv::Error> {
     println!("Welcome to the LD Pruning Module.");
 
-    // Get the input file path, nrows (including header), and ncols from command line arguments
     let args: Vec<String> = env::args().collect();
-    if args.len() != 6 {
-        println!("Usage: {} <input_file> <n_rows> <n_cols> <maf_cutoff> <output_directory>", args[0]);
+
+    // Determine method from flags present anywhere in the argument list
+    let method = if args.contains(&"--dprime".to_string()) {
+        Method::DPrime
+    } else if args.contains(&"--dedup".to_string()) {
+        Method::DedupOnly
+    } else {
+        Method::Correlation // default (also triggered by --r)
+    };
+
+    // Positional args differ: --dedup doesn't need an ld_threshold
+    let (input_file, n_rows, n_cols, maf_cutoff, ld_threshold, outdir) = match method {
+        Method::DedupOnly => {
+            // --dedup: 5 positional args (no ld_threshold needed)
+            let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
+            if positional.len() != 6 {
+                eprintln!(
+                    "Usage: bacprune <input_file> <n_rows> <n_cols> <maf_cutoff> <output_directory> --dedup"
+                );
+                return Ok(());
+            }
+            (positional[1].clone(), positional[2].clone(), positional[3].clone(),
+             positional[4].clone(), "0".to_string(), positional[5].clone())
+        }
+        _ => {
+            // --r / --dprime: 6 positional args (ld_threshold required)
+            let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
+            if positional.len() != 7 {
+                eprintln!(
+                    "Usage: bacprune <input_file> <n_rows> <n_cols> <maf_cutoff> <ld_threshold> <output_directory> [--r|--dprime]"
+                );
+                return Ok(());
+            }
+            (positional[1].clone(), positional[2].clone(), positional[3].clone(),
+             positional[4].clone(), positional[5].clone(), positional[6].clone())
+        }
+    };
+
+    let n_rows: usize     = n_rows.parse().expect("n_rows must be a positive integer");
+    let n_cols: usize     = n_cols.parse().expect("n_cols must be a positive integer");
+    let maf_cutoff: f64   = maf_cutoff.parse().expect("maf_cutoff must be a float (e.g. 0.01)");
+    let ld_threshold: f64 = ld_threshold.parse().unwrap_or(0.0);
+
+    match method {
+        Method::Correlation => println!("Method: |r|   threshold >= {ld_threshold}"),
+        Method::DPrime      => println!("Method: D'    threshold >= {ld_threshold}"),
+        Method::DedupOnly   => println!("Method: --dedup (hash-based exact duplicate removal only)"),
+    }
+
+    // ── Read data ────────────────────────────────────────────────────────────
+    let raw_gt_data = read_csv(&input_file, n_rows, n_cols);
+    println!("Data read successfully.");
+
+    // First row is the header (variant IDs stored as f64 column indices)
+    let gt_header   = raw_gt_data.select(Axis(0), &[0usize]);
+    let raw_gt_data = raw_gt_data.slice(s![1.., ..]).to_owned();
+
+    // ── MAF filter ───────────────────────────────────────────────────────────
+    let mafs = calc_maf(&raw_gt_data);
+    let (maf_data, maf_keep_idx) = maf_prune(&raw_gt_data, &mafs, &maf_cutoff);
+    let gt_header = gt_header.select(Axis(1), maf_keep_idx.as_slice());
+
+    // Save the full post-MAF header before any LD pruning.  This is used later
+    // to look up variant IDs for ALL variants (including those pruned by LD),
+    // so that direction_of_correlation.csv can reference them by name.
+    let maf_gt_header = gt_header.clone(); // shape (1 × n_maf_variants)
+
+    println!("MAF filter complete. {} variants kept.", maf_data.ncols());
+
+    // ── Phase 1: hash-based exact duplicate removal ───────────────────────────
+    // Indices in the returned DirectionMap are into maf_data (post-MAF space).
+    // All identical duplicates are positively correlated (r = 1) with their rep.
+    let (dedup_data, dedup_keep_idx, mut direction_map) = dedup_variants(&maf_data);
+    let gt_header = gt_header.select(Axis(1), &dedup_keep_idx);
+    println!("Exact duplicate removal complete. {} variants kept.", dedup_data.ncols());
+
+    // If --dedup, we are done after phase 1
+    if method == Method::DedupOnly {
+        write_outputs(&dedup_data, &gt_header, &direction_map, &maf_gt_header, &outdir)?;
         return Ok(());
     }
-    let input_file = &args[1];
-    let n_rows: usize = args[2].parse().expect("Please provide a valid number for n_rows");
-    let n_cols: usize = args[3].parse().expect("Please provide a valid number for n_cols");
-    let cutoff: f64 = args[4].parse().expect("Please provide a MAF cutoff (variants with a minor allele frequency below this cutoff will be pruned out)");
-    let outdir = &args[5];
 
-    // Read in data
-    let raw_gt_data = read_csv(input_file, n_rows, n_cols);
-    println!("Your data has been successfully read in. Sit tight while we run your analysis.");
+    // ── Phase 2: threshold LD pruning (r or D') ───────────────────────────────
+    // Indices here are into dedup_data (post-dedup space).
+    // We convert them back to post-MAF space before inserting into direction_map.
+    let mafs = calc_maf(&dedup_data);
+    let mut skip: HashSet<usize> = HashSet::new();
 
-    // Extract header row (first row), then drop it from the data
-    let gt_header = raw_gt_data.select(Axis(0), &[0usize]);
-    let raw_gt_data = raw_gt_data.slice(s![1..raw_gt_data.nrows(), ..]).to_owned();
+    'outer: for i in 0..dedup_data.ncols() {
+        if skip.contains(&i) { continue; }
+        for j in (i + 1)..dedup_data.ncols() {
+            if skip.contains(&j) { continue; }
 
-    //Calculate MAF
-    let mafs = calc_maf(&raw_gt_data);
-    println!("Minor allele frequencies were successfully calculated.");
+            let ld = match method {
+                Method::DPrime => calculate_d_prime(&dedup_data, i, j).abs(),
+                _              => calculate_r(&dedup_data, i, j).abs(),
+            };
 
-    //Discard variants with MAF below cutoff
-    let (filtered_gt_data, keep_index) = maf_prune(&raw_gt_data, &mafs, &cutoff);
-    let gt_header = gt_header.select(Axis(1), keep_index.as_slice());
-    println!("Data were successfully filtered by MAF.");
+            if ld >= ld_threshold {
+                // Prune the lower-MAF variant; keep the higher-MAF one.
+                let (keep, prune) = if mafs[i] >= mafs[j] { (i, j) } else { (j, i) };
+                skip.insert(prune);
 
-    //Update MAF list after discarding variants
-    let mafs = calc_maf(&filtered_gt_data);
+                // Record direction using r (sign is the same for both r and D').
+                // Convert post-dedup indices to post-MAF indices for direction_map.
+                let r_signed       = calculate_r(&dedup_data, i, j);
+                let is_positive    = r_signed >= 0.0;
+                let prune_maf_idx  = dedup_keep_idx[prune];
+                let keep_maf_idx   = dedup_keep_idx[keep];
+                direction_map.insert(prune_maf_idx, (keep_maf_idx, is_positive));
 
-    // create skip index (using HashSet package for a set)
-    let mut skip_index: HashSet<usize> = HashSet::new();
-    // create index to track SNPs that are pruned out and their representative SNP
-    let mut rep_snps: HashMap<usize, Vec<usize>> = HashMap::new();
-
-    //When a variant is pruned, its index number is added to this set
-    //Before trying to compare two variants, the loop first checks that neither is in the index
-    //This means that variants that have already been pruned will be skipped over during future iterations,
-    //without causing any indexing issues
-    //The skip index also acts as the record of which variants should be pruned out of the dataset
-
-    for i in 0..filtered_gt_data.ncols() {
-        for j in i + 1..filtered_gt_data.ncols() {
-            if (mafs[i] - mafs[j]).abs() < 1e-6 && !skip_index.contains(&i) && !skip_index.contains(&j) {
-                let rowsums_ij = filtered_gt_data.select(Axis(1), &[i, j]).sum_axis(Axis(1));
-                if rowsums_ij.iter().all(|&x| x == 0.0 || x == 2.0) {
-                    // SNPs i and j are in perfect LD; keep i as the representative, prune j
-                    skip_index.insert(j);
-                    rep_snps.entry(i).or_insert_with(Vec::new).push(j);
-                }
+                // If i itself was just pruned, it can no longer act as a
+                // representative for further j values — exit the inner loop.
+                if prune == i { continue 'outer; }
             }
         }
     }
 
-    //turn skip index into keep index (so can use in pruning .select() function)
-    let keep_index: Vec<usize> = (0..filtered_gt_data.ncols()).filter(|x| !skip_index.contains(x)).collect();
+    let phase2_keep: Vec<usize> = (0..dedup_data.ncols()).filter(|x| !skip.contains(x)).collect();
+    let pruned_data   = dedup_data.select(Axis(1), &phase2_keep);
+    let pruned_header = gt_header.select(Axis(1), &phase2_keep);
+    println!("LD threshold pruning complete. {} variants kept.", pruned_data.ncols());
 
-    //LD PRUNE PHASE 1
-    // Prune the LD=1 variants out!
-    let ldbelow1_gt_data = filtered_gt_data.select(Axis(1), keep_index.as_slice());
-    println!("LD pruning phase 1 has been completed.");
+    write_outputs(&pruned_data, &pruned_header, &direction_map, &maf_gt_header, &outdir)?;
+    Ok(())
+}
 
-    //ADD HEADER BACK IN
-    let gt_header = gt_header.select(Axis(1), keep_index.as_slice());
-    let ldbelow1_gt_data = ndarray::concatenate![Axis(0), gt_header, ldbelow1_gt_data];
+// ── Output helper ─────────────────────────────────────────────────────────────
 
-    let string_arr = ldbelow1_gt_data.map(|e| e.to_string());
+/// Write all three output CSVs to `outdir`:
+///   1. `bacprune_rust_results.csv`     — final pruned genotype matrix
+///   2. `ld_pruning_summary.csv`        — representative → pruned SNPs
+///   3. `direction_of_correlation.csv`  — per-variant status and direction
+///
+/// `maf_gt_header` is the full post-MAF header (1 × n_maf_variants) used to
+/// resolve variant IDs for both kept and pruned variants in the direction CSV.
+/// Indices in `direction_map` are into post-MAF column space.
+fn write_outputs(
+    data:          &Array2<f64>,
+    header:        &Array2<f64>,
+    direction_map: &DirectionMap,
+    maf_gt_header: &Array2<f64>,
+    outdir:        &str,
+) -> Result<(), csv::Error> {
 
-    // construct the full path to the results CSV file
-    let csv_path = Path::new(outdir).join("bacprune_rust_results.csv");
-
-    let file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .append(true)
-        .open(csv_path)
-        .unwrap();
+    // 1. Results CSV ──────────────────────────────────────────────────────────
+    let final_data = ndarray::concatenate![Axis(0), *header, *data];
+    let string_arr = final_data.map(|e| e.to_string());
+    let csv_path   = Path::new(outdir).join("bacprune_rust_results.csv");
+    let file = OpenOptions::new().write(true).create(true).append(true).open(csv_path).unwrap();
     let mut wtr = csv::Writer::from_writer(file);
-
-    for i in 0..ldbelow1_gt_data.nrows() {
-        wtr.write_record(&string_arr.slice(s![i, ..])).expect("Error in writing to .csv");
+    for i in 0..final_data.nrows() {
+        wtr.write_record(&string_arr.slice(s![i, ..])).expect("Error writing to CSV");
     }
-
     wtr.flush()?;
 
-    // Write representative SNPs and pruned SNPs to a new .csv
-    let rep_snp_path = Path::new(outdir).join("ld_pruning_summary.csv");
-    let file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .append(true)
-        .open(rep_snp_path)
-        .unwrap();
+    // 2. Summary CSV ──────────────────────────────────────────────────────────
+    // Derive rep → pruned list from direction_map.
+    let mut rep_snps: HashMap<usize, Vec<usize>> = HashMap::new();
+    for (&pruned, &(rep, _)) in direction_map {
+        rep_snps.entry(rep).or_insert_with(Vec::new).push(pruned);
+    }
+    let summary_path = Path::new(outdir).join("ld_pruning_summary.csv");
+    let file = OpenOptions::new().write(true).create(true).append(true).open(summary_path).unwrap();
     let mut wtr = csv::Writer::from_writer(file);
-    wtr.write_record(&["Representative SNP (base 0 indexing)", "Pruned SNPs (base 0 indexing)"]).expect("Error writing header to CSV");
-    for (rep_snp, pruned_snps) in rep_snps {
-        let rep_snp_str = rep_snp.to_string();
-        let pruned_snps_str = pruned_snps.iter().map(|snp| snp.to_string()).collect::<Vec<String>>().join(", ");
-        wtr.write_record(&[rep_snp_str, pruned_snps_str]).expect("Error writing record to CSV");
+    wtr.write_record(&["Representative SNP (base 0 indexing)", "Pruned SNPs (base 0 indexing)"])
+        .expect("Error writing summary header");
+    for (rep, pruned) in &rep_snps {
+        let pruned_str = pruned.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(", ");
+        wtr.write_record(&[rep.to_string(), pruned_str]).expect("Error writing summary record");
+    }
+    wtr.flush()?;
+
+    // 3. Direction CSV ────────────────────────────────────────────────────────
+    // Rows for every post-MAF variant (representatives and pruned alike).
+    // Status values:
+    //   "representative"       — variant was kept; is the representative for its group
+    //   "positive_correlation" — variant was pruned; genotype matches its representative (r > 0)
+    //   "negative_correlation" — variant was pruned; genotype is the complement of its rep (r < 0)
+    let direction_path = Path::new(outdir).join("direction_of_correlation.csv");
+    let file = OpenOptions::new().write(true).create(true).append(true).open(direction_path).unwrap();
+    let mut wtr = csv::Writer::from_writer(file);
+    wtr.write_record(&["Variant", "Status", "Representative Variant"])
+        .expect("Error writing direction header");
+    let n_maf = maf_gt_header.ncols();
+    for idx in 0..n_maf {
+        let variant_id = maf_gt_header[[0, idx]].to_string();
+        match direction_map.get(&idx) {
+            Some(&(rep_idx, is_positive)) => {
+                let status   = if is_positive { "positive_correlation" } else { "negative_correlation" };
+                let rep_id   = maf_gt_header[[0, rep_idx]].to_string();
+                wtr.write_record(&[variant_id, status.to_string(), rep_id])
+                    .expect("Error writing direction record");
+            }
+            None => {
+                // This variant is a representative (not pruned by any step)
+                wtr.write_record(&[variant_id.clone(), "representative".to_string(), variant_id])
+                    .expect("Error writing direction record");
+            }
+        }
     }
     wtr.flush()?;
 
     Ok(())
 }
 
-// MAIN FUNCTION DEFINITIONS
+// ── Core functions ────────────────────────────────────────────────────────────
 
+/// Read a headerless CSV into a 2-D f64 array of shape (n_rows × n_cols).
+/// The caller is responsible for passing the correct dimensions; the function
+/// will panic if the file cannot be opened or parsed.
 fn read_csv(path_to_file: &str, n_rows: usize, n_cols: usize) -> Array2<f64> {
     let file = File::open(path_to_file).expect("File not found :(");
     let mut reader = ReaderBuilder::new().has_headers(false).from_reader(file);
-    reader.deserialize_array2::<f64>((n_rows, n_cols)).expect("Failed to unwrap .csv file.")
+    reader.deserialize_array2::<f64>((n_rows, n_cols)).expect("Failed to parse CSV as f64 array.")
 }
 
+/// Compute the minor allele frequency (MAF) for every variant (column).
+/// For a haploid 0/1 matrix this is simply the mean of each column.
+/// Returns a 1-D array of length n_cols.
 fn calc_maf(data: &Array2<f64>) -> Array1<f64> {
-    let num_individuals = data.nrows() as f64;
-    let calcmafs = data.sum_axis(Axis(0));
-    calcmafs.div(num_individuals)
+    data.sum_axis(Axis(0)).div(data.nrows() as f64)
 }
 
+/// Remove variants whose MAF is strictly below `cutoff`.
+/// Returns the filtered matrix and the original column indices that were kept,
+/// so that the caller can apply the same filter to the header row.
 fn maf_prune(data: &Array2<f64>, mafs: &Array1<f64>, cutoff: &f64) -> (Array2<f64>, Vec<usize>) {
-    // Find index of each column with a MAF at or above the cutoff
-    let keep_these_index = mafs
-        .into_iter()
+    let keep: Vec<usize> = mafs
+        .iter()
         .enumerate()
-        .filter(|(_, x)| x >= &cutoff)
-        .map(|(index, _)| index)
-        .collect::<Vec<_>>();
-
-    let filtered_data = data.select(Axis(1), &keep_these_index);
-    (filtered_data, keep_these_index)
+        .filter(|(_, &x)| x >= *cutoff)
+        .map(|(i, _)| i)
+        .collect();
+    (data.select(Axis(1), &keep), keep)
 }
 
+/// Reorder the columns of `data` in ascending MAF order.
+/// NaN MAF values are sorted to the end.
 fn sort_by_maf(mafs: &Array1<f64>, data: &Array2<f64>) -> Array2<f64> {
-    let sorted_mafs_index = sort(mafs);
-    return data.select(Axis(1), sorted_mafs_index.as_slice());
+    return data.select(Axis(1), sort_indices(mafs).as_slice());
 
-    // Define function used to sort MAF vector and find its index
-    fn sort(arr: &Array1<f64>) -> Vec<usize> {
-        let mut out = (0..arr.len()).collect::<Vec<usize>>();
-        out.sort_by(|&a_idx, &b_idx| {
-            let a = arr[a_idx];
-            let b = arr[b_idx];
-            match (a.is_nan(), b.is_nan()) {
-                (true, true) => Ordering::Equal,
-                (true, false) => Ordering::Greater,
-                (false, true) => Ordering::Less,
-                (false, false) => a.partial_cmp(&b).unwrap(),
+    /// Returns column indices sorted so that arr[idx[0]] ≤ arr[idx[1]] ≤ …
+    /// NaN values are placed last.
+    fn sort_indices(arr: &Array1<f64>) -> Vec<usize> {
+        let mut idx = (0..arr.len()).collect::<Vec<usize>>();
+        idx.sort_by(|&a, &b| {
+            match (arr[a].is_nan(), arr[b].is_nan()) {
+                (true,  true)  => Ordering::Equal,
+                (true,  false) => Ordering::Greater,
+                (false, true)  => Ordering::Less,
+                (false, false) => arr[a].partial_cmp(&arr[b]).unwrap(),
             }
         });
-        out
+        idx
     }
 }
 
+/// Hash-based exact duplicate removal — O(n·v), no pairwise comparisons.
+///
+/// Each column is encoded as a `Vec<u8>` key (safe for haploid 0/1 data) and
+/// inserted into a `HashMap`. The first occurrence of each unique genotype
+/// pattern is kept; all later identical columns are recorded in the
+/// returned `DirectionMap` with `is_positive = true` (identical ⇒ r = 1).
+///
+/// Note: complementary columns (one is the bitwise NOT of the other) hash to
+/// *different* keys and are therefore both kept.
+///
+/// Returns `(deduplicated_data, kept_column_indices, direction_map)`.
+/// All indices are in the space of the input `data` (post-MAF column space).
+fn dedup_variants(data: &Array2<f64>) -> (Array2<f64>, Vec<usize>, DirectionMap) {
+    let mut seen: HashMap<Vec<u8>, usize> = HashMap::new();
+    let mut keep: Vec<usize>              = Vec::new();
+    let mut direction_map: DirectionMap   = HashMap::new();
+
+    for j in 0..data.ncols() {
+        let key: Vec<u8> = data.column(j).iter().map(|&x| x as u8).collect();
+        match seen.get(&key) {
+            Some(&rep) => {
+                // Identical to `rep` — positively correlated (r = 1)
+                direction_map.insert(j, (rep, true));
+            }
+            None => {
+                seen.insert(key, j);
+                keep.push(j);
+            }
+        }
+    }
+
+    (data.select(Axis(1), &keep), keep, direction_map)
+}
+
+/// Pearson correlation coefficient between two binary (0/1) columns.
+///
+/// Uses the computational form:
+///   r = (n·Σxy − Σx·Σy) / √((Σx·(n−Σx)) · (Σy·(n−Σy)))
+///
+/// Returns a value in [−1, 1].  Returns 0 if either column is monomorphic
+/// (zero variance), avoiding a division-by-zero.
+fn calculate_r(data: &Array2<f64>, varianta: usize, variantb: usize) -> f64 {
+    let n      = data.nrows() as f64;
+    let col_a  = data.column(varianta);
+    let col_b  = data.column(variantb);
+    let sum_a  = col_a.sum();
+    let sum_b  = col_b.sum();
+    let sum_ab: f64 = col_a.iter().zip(col_b.iter()).map(|(x, y)| x * y).sum();
+
+    let numerator = n * sum_ab - sum_a * sum_b;
+    // For binary data Σx² = Σx, so n·Σx² − (Σx)² simplifies to sum_x·(n − sum_x).
+    let var_a = sum_a * (n - sum_a);
+    let var_b = sum_b * (n - sum_b);
+    let denom = (var_a * var_b).sqrt();
+
+    if denom < 1e-10 { return 0.0; }
+    numerator / denom
+}
+
+/// Lewontin's D' linkage disequilibrium coefficient for two variants.
+///
+/// D' measures the deviation from linkage equilibrium normalised by the
+/// maximum possible deviation given the observed allele frequencies:
+///   D  = f(00)·f(11) − f(10)·f(01)
+///   D' = D / D_max
+///
+/// where D_max is chosen so that |D'| ∈ [0, 1]:
+///   If D > 0: D_max = min(freq_0A·freq_1B,  freq_1A·freq_0B)
+///   If D < 0: D_max = max(−freq_0A·freq_0B, −freq_1A·freq_1B)
+///
+/// This function always returns |D'|, so the result is in [0, 1].
+/// D' = 0 means no LD; D' = 1 means perfect LD (identical or complementary columns).
+/// Use `calculate_r` to obtain the sign (direction) of the association.
 fn calculate_d_prime(data: &ArrayBase<OwnedRepr<f64>, Dim<[usize; 2]>>, varianta: usize, variantb: usize) -> f64 {
-    let allele_frequencies = find_allele_frequencies(data);
-    let haplotype_frequencies = find_haplotype_frequencies(data, varianta, variantb);
-    return calc_d_prime(&allele_frequencies, &haplotype_frequencies, varianta, variantb);
+    let af = find_allele_frequencies(data);
+    let hf = find_haplotype_frequencies(data, varianta, variantb);
+    return calc_d_prime(&af, &hf, varianta, variantb);
 
+    /// Returns a 2×v array where row 0 = freq(allele 0) and row 1 = freq(allele 1)
+    /// for each of the v variants.
     fn find_allele_frequencies(data: &Array2<f64>) -> Array2<f64> {
-        let n = data.nrows() as f64;
-        let allele_frequencies1 = data.t().sum_axis(Axis(1)); // col sums = count of allele 1
-        let allele_frequencies0 = n - &allele_frequencies1;   // count of allele 0
-        let allele_frequencies = ndarray::stack![Axis(0), allele_frequencies0, allele_frequencies1];
-        allele_frequencies.div(n) // allele_freqs0 in first row, allele_freqs1 in second row
+        let n     = data.nrows() as f64;
+        let freq1 = data.t().sum_axis(Axis(1)); // column sums = count of allele 1
+        let freq0 = n - &freq1;                 // count of allele 0
+        ndarray::stack![Axis(0), freq0, freq1].div(n)
     }
 
-    fn find_haplotype_frequencies(data: &Array2<f64>, varianta: usize, variantb: usize) -> Array1<f64> {
-        let n = data.nrows() as f64;
-        let var_a = data.slice(s![.., varianta]);
-        let var_b = data.slice(s![.., variantb]);
-        let ab = ndarray::stack![Axis(0), var_a, var_b];
-
-        let arr_onezero = Array::from_shape_vec((2).f(), vec![1.0, 0.0]).unwrap();
-        let arr_zeroone = Array::from_shape_vec((2).f(), vec![0.0, 1.0]).unwrap();
-
-        // Count each of the four possible haplotypes (00, 10, 01, 11)
-        let bothzero = ab.axis_iter(Axis(1)).filter(|&x| x == Array::zeros(2)).count() as f64;
-        let onezero  = ab.axis_iter(Axis(1)).filter(|&x| x == arr_onezero).count() as f64;
-        let zeroone  = ab.axis_iter(Axis(1)).filter(|&x| x == arr_zeroone).count() as f64;
-        let bothone  = ab.axis_iter(Axis(1)).filter(|&x| x == Array::ones(2)).count() as f64;
-
-        let haplotype_frequencies = ndarray::array![bothzero, onezero, zeroone, bothone];
-        haplotype_frequencies.div(n)
+    /// Returns the four haplotype frequencies [f00, f10, f01, f11] for the
+    /// pair (varianta, variantb), where e.g. f10 = freq(allele1_A, allele0_B).
+    fn find_haplotype_frequencies(data: &Array2<f64>, va: usize, vb: usize) -> Array1<f64> {
+        let n       = data.nrows() as f64;
+        let a       = data.slice(s![.., va]);
+        let b       = data.slice(s![.., vb]);
+        let ab      = ndarray::stack![Axis(0), a, b]; // 2×n matrix; each column is one sample
+        let onezero = Array::from_shape_vec((2).f(), vec![1.0, 0.0]).unwrap();
+        let zeroone = Array::from_shape_vec((2).f(), vec![0.0, 1.0]).unwrap();
+        let f00 = ab.axis_iter(Axis(1)).filter(|&x| x == Array::zeros(2)).count() as f64;
+        let f10 = ab.axis_iter(Axis(1)).filter(|&x| x == onezero).count()          as f64;
+        let f01 = ab.axis_iter(Axis(1)).filter(|&x| x == zeroone).count()          as f64;
+        let f11 = ab.axis_iter(Axis(1)).filter(|&x| x == Array::ones(2)).count()   as f64;
+        ndarray::array![f00, f10, f01, f11].div(n)
     }
 
-    fn calc_d_prime(allele_freqs: &Array2<f64>, haplotype_freqs: &Array1<f64>, varianta: usize, variantb: usize) -> f64 {
-        // D = f(00)*f(11) - f(10)*f(01)
-        let d_score = (haplotype_freqs[[0]] * haplotype_freqs[[3]]) - (haplotype_freqs[[1]] * haplotype_freqs[[2]]);
-
-        if d_score < 0.0 {
-            // D_max = max(-f(A)*f(B), -f(a)*f(b))
-            let d_max_set = vec![
-                -1.0 * allele_freqs[[0, varianta]] * allele_freqs[[0, variantb]],
-                -1.0 * allele_freqs[[1, varianta]] * allele_freqs[[1, variantb]],
-            ];
-            let d_max = d_max_set.iter().max_by(|a, b| a.total_cmp(b)).expect("Oops");
-            d_score / d_max
-
-        } else if d_score > 0.0 {
-            // D_max = min(f(A)*f(b), f(a)*f(B))
-            let d_max_set = vec![
-                allele_freqs[[0, varianta]] * allele_freqs[[1, variantb]],
-                allele_freqs[[1, varianta]] * allele_freqs[[0, variantb]],
-            ];
-            let d_max = d_max_set.iter().min_by(|a, b| a.total_cmp(b)).expect("Oops");
-            d_score / d_max
-
+    /// Compute D' from pre-computed allele frequencies `af` and haplotype
+    /// frequencies `hf` for the pair (va, vb).
+    fn calc_d_prime(af: &Array2<f64>, hf: &Array1<f64>, va: usize, vb: usize) -> f64 {
+        let d = hf[0] * hf[3] - hf[1] * hf[2]; // D = f(00)·f(11) − f(10)·f(01)
+        if d < 0.0 {
+            let d_max = f64::max(-af[[0,va]] * af[[0,vb]], -af[[1,va]] * af[[1,vb]]);
+            d / d_max
+        } else if d > 0.0 {
+            let d_max = f64::min(af[[0,va]] * af[[1,vb]], af[[1,va]] * af[[0,vb]]);
+            d / d_max
         } else {
             0.0
         }
     }
 }
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -240,24 +427,19 @@ mod tests {
 
     #[test]
     fn test_calc_maf_basic() {
-        // 3 samples × 3 variants
-        // col 0: all 1s  → MAF = 1.0
-        // col 1: one 1   → MAF = 1/3
-        // col 2: all 0s  → MAF = 0.0
         let data = array![
             [1.0, 1.0, 0.0],
             [1.0, 0.0, 0.0],
             [1.0, 0.0, 0.0],
         ];
         let mafs = calc_maf(&data);
-        assert!((mafs[0] - 1.0).abs() < 1e-10);
-        assert!((mafs[1] - 1.0 / 3.0).abs() < 1e-10);
-        assert!((mafs[2] - 0.0).abs() < 1e-10);
+        assert!((mafs[0] - 1.0).abs()      < 1e-10);
+        assert!((mafs[1] - 1.0/3.0).abs()  < 1e-10);
+        assert!((mafs[2] - 0.0).abs()       < 1e-10);
     }
 
     #[test]
     fn test_calc_maf_uses_nrows() {
-        // MAF must be relative to the actual number of rows, not a hardcoded constant
         let data = array![[1.0, 0.0], [0.0, 1.0]];
         let mafs = calc_maf(&data);
         assert!((mafs[0] - 0.5).abs() < 1e-10);
@@ -268,7 +450,6 @@ mod tests {
 
     #[test]
     fn test_maf_prune_removes_low_maf() {
-        // col 0 MAF=0.5, col 1 MAF=0.0 → col 1 pruned
         let data = array![[1.0, 0.0], [0.0, 0.0], [1.0, 0.0], [0.0, 0.0]];
         let mafs = array![0.5, 0.0];
         let (filtered, keep_idx) = maf_prune(&data, &mafs, &0.01);
@@ -278,7 +459,6 @@ mod tests {
 
     #[test]
     fn test_maf_prune_keeps_at_cutoff() {
-        // A variant with MAF exactly equal to the cutoff should be kept
         let data = array![[1.0, 0.0], [0.0, 0.0]];
         let mafs = array![0.5, 0.01];
         let (filtered, keep_idx) = maf_prune(&data, &mafs, &0.01);
@@ -299,15 +479,9 @@ mod tests {
 
     #[test]
     fn test_sort_by_maf_ascending() {
-        let data = array![
-            [1.0, 0.0, 1.0],
-            [1.0, 1.0, 0.0],
-        ];
-        // col 0 → maf 0.9, col 1 → maf 0.1, col 2 → maf 0.5
-        // sorted ascending: col1, col2, col0
+        let data = array![[1.0, 0.0, 1.0], [1.0, 1.0, 0.0]];
         let mafs = array![0.9, 0.1, 0.5];
         let sorted = sort_by_maf(&mafs, &data);
-        // After sorting the first column should be what was col 1
         assert_eq!(sorted.column(0).to_vec(), data.column(1).to_vec());
         assert_eq!(sorted.column(1).to_vec(), data.column(2).to_vec());
         assert_eq!(sorted.column(2).to_vec(), data.column(0).to_vec());
@@ -317,62 +491,144 @@ mod tests {
     fn test_sort_by_maf_already_sorted() {
         let data = array![[0.0, 1.0, 1.0], [0.0, 0.0, 1.0]];
         let mafs = array![0.0, 0.5, 1.0];
-        let sorted = sort_by_maf(&mafs, &data);
-        assert_eq!(sorted, data);
+        assert_eq!(sort_by_maf(&mafs, &data), data);
+    }
+
+    // ── dedup_variants ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_dedup_removes_identical_columns() {
+        // col 1 is identical to col 0 → pruned with direction=positive
+        let data = array![
+            [1.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 1.0, 0.0],
+        ];
+        let (deduped, keep_idx, direction_map) = dedup_variants(&data);
+        assert_eq!(deduped.ncols(), 2);
+        assert_eq!(keep_idx, vec![0, 2]);
+        assert_eq!(direction_map[&1], (0, true), "col 1 should map to rep=0, positive");
+    }
+
+    #[test]
+    fn test_dedup_keeps_opposite_columns() {
+        // Opposite columns are NOT identical — both kept, direction_map empty
+        let data = array![
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 0.0],
+        ];
+        let (deduped, keep_idx, direction_map) = dedup_variants(&data);
+        assert_eq!(deduped.ncols(), 2);
+        assert_eq!(keep_idx, vec![0, 1]);
+        assert!(direction_map.is_empty());
+    }
+
+    #[test]
+    fn test_dedup_no_duplicates() {
+        let data = array![[1.0, 0.0], [0.0, 0.0], [1.0, 1.0]];
+        let (deduped, keep_idx, direction_map) = dedup_variants(&data);
+        assert_eq!(deduped.ncols(), 2);
+        assert_eq!(keep_idx, vec![0, 1]);
+        assert!(direction_map.is_empty());
+    }
+
+    #[test]
+    fn test_dedup_multiple_duplicates_same_group() {
+        // cols 0, 1, 2 all identical → keep col 0, prune 1 and 2 (both positive)
+        let data = array![
+            [1.0, 1.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        let (deduped, keep_idx, direction_map) = dedup_variants(&data);
+        assert_eq!(deduped.ncols(), 2);
+        assert_eq!(keep_idx, vec![0, 3]);
+        assert_eq!(direction_map[&1], (0, true));
+        assert_eq!(direction_map[&2], (0, true));
+    }
+
+    // ── direction map from phase-2-style pruning ──────────────────────────────
+
+    #[test]
+    fn test_direction_positive_for_identical_pair() {
+        // r for identical columns = 1.0 → positive
+        let data = array![[1.0,1.0],[0.0,0.0],[1.0,1.0],[0.0,0.0]];
+        let r = calculate_r(&data, 0, 1);
+        assert!(r >= 0.0, "identical columns should give r >= 0, got {r}");
+    }
+
+    #[test]
+    fn test_direction_negative_for_opposite_pair() {
+        // r for complementary columns = -1.0 → negative
+        let data = array![[1.0,0.0],[0.0,1.0],[1.0,0.0],[0.0,1.0]];
+        let r = calculate_r(&data, 0, 1);
+        assert!(r < 0.0, "opposite columns should give r < 0, got {r}");
+    }
+
+    // ── calculate_r ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_r_identical_columns_is_one() {
+        let data = array![[1.0,1.0],[0.0,0.0],[1.0,1.0],[0.0,0.0]];
+        let r = calculate_r(&data, 0, 1);
+        assert!((r - 1.0).abs() < 1e-10, "r for identical columns should be 1.0, got {r}");
+    }
+
+    #[test]
+    fn test_r_opposite_columns_is_minus_one() {
+        let data = array![[1.0,0.0],[0.0,1.0],[1.0,0.0],[0.0,1.0]];
+        let r = calculate_r(&data, 0, 1);
+        assert!((r + 1.0).abs() < 1e-10, "r for opposite columns should be -1.0, got {r}");
+    }
+
+    #[test]
+    fn test_r_independent_variants_is_zero() {
+        let data = array![[0.0,0.0],[0.0,1.0],[1.0,0.0],[1.0,1.0]];
+        let r = calculate_r(&data, 0, 1);
+        assert!(r.abs() < 1e-10, "r for independent variants should be 0.0, got {r}");
+    }
+
+    #[test]
+    fn test_r_monomorphic_variant_is_zero() {
+        let data = array![[1.0,0.0],[0.0,0.0],[1.0,0.0]];
+        let r = calculate_r(&data, 0, 1);
+        assert!(r.abs() < 1e-10, "r with monomorphic column should be 0.0, got {r}");
+    }
+
+    #[test]
+    fn test_r_self_is_one() {
+        let data = array![[1.0,0.0],[0.0,1.0],[1.0,0.0]];
+        let r = calculate_r(&data, 0, 0);
+        assert!((r - 1.0).abs() < 1e-10, "r of variant with itself should be 1.0, got {r}");
     }
 
     // ── calculate_d_prime ────────────────────────────────────────────────────
 
     #[test]
     fn test_d_prime_identical_columns_is_one() {
-        // Two identical columns are in perfect LD → D' = 1
-        let data = array![
-            [1.0, 1.0],
-            [0.0, 0.0],
-            [1.0, 1.0],
-            [0.0, 0.0],
-        ];
+        let data = array![[1.0,1.0],[0.0,0.0],[1.0,1.0],[0.0,0.0]];
         let d = calculate_d_prime(&data, 0, 1);
-        assert!((d - 1.0).abs() < 1e-10, "D' should be 1.0, got {d}");
+        assert!((d - 1.0).abs() < 1e-10, "D' for identical columns should be 1.0, got {d}");
     }
 
     #[test]
     fn test_d_prime_self_is_one() {
-        // A variant compared with itself is always D' = 1
-        let data = array![
-            [1.0, 0.0],
-            [0.0, 1.0],
-            [1.0, 0.0],
-            [0.0, 1.0],
-        ];
+        let data = array![[1.0,0.0],[0.0,1.0],[1.0,0.0],[0.0,1.0]];
         let d = calculate_d_prime(&data, 0, 0);
         assert!((d - 1.0).abs() < 1e-10, "D' of variant with itself should be 1.0, got {d}");
     }
 
     #[test]
     fn test_d_prime_independent_variants_is_zero() {
-        // All four haplotypes equally represented → D = 0 → D' = 0
-        let data = array![
-            [0.0, 0.0],
-            [0.0, 1.0],
-            [1.0, 0.0],
-            [1.0, 1.0],
-        ];
+        let data = array![[0.0,0.0],[0.0,1.0],[1.0,0.0],[1.0,1.0]];
         let d = calculate_d_prime(&data, 0, 1);
         assert!(d.abs() < 1e-10, "D' for independent variants should be 0.0, got {d}");
     }
 
     #[test]
     fn test_d_prime_opposite_columns_is_one() {
-        // col 1 = NOT col 0 → perfectly anticorrelated, but still perfect LD.
-        // This implementation returns |D'| (always ≥ 0), so the result is 1.0.
-        // Alleles are fully predictable from each other, just complementary.
-        let data = array![
-            [1.0, 0.0],
-            [0.0, 1.0],
-            [1.0, 0.0],
-            [0.0, 1.0],
-        ];
+        // Perfectly anticorrelated → |D'| = 1 (perfect LD, complementary direction)
+        let data = array![[1.0,0.0],[0.0,1.0],[1.0,0.0],[0.0,1.0]];
         let d = calculate_d_prime(&data, 0, 1);
         assert!((d - 1.0).abs() < 1e-10, "D' for opposite columns should be 1.0 (|D'|), got {d}");
     }
