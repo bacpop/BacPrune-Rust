@@ -102,8 +102,8 @@ A CSV of numeric values. The first row is a header of (numeric) variant identifi
 
 ```
 bacprune genotypes.csv 613 87092 0.05 ./results --ld 1           # D' (default) pruning for D'=1, filter variants with MAF<5%
-bacprune genotypes.csv 613 87092 0 ./results --ld 0.8 --r        # Pearson r pruning for r>0.8, no MAF filtering
-bacprune genotypes.csv 613 87092 0.01 ./results --dedup          # exact duplicates only, filter samples with MAF<1%
+bacprune genotypes.csv 613 87092 0 ./results --ld 0.8 --r        # Pearson r pruning for |r|≥0.8, no MAF filtering
+bacprune genotypes.csv 613 87092 0.01 ./results --dedup          # exact duplicates only, filter variants with MAF<1%
 ```
 
 ## Output files

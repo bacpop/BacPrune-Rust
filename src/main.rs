@@ -93,6 +93,26 @@ fn main() -> Result<(), csv::Error> {
 
     println!("Welcome to the LD Pruning Module.");
 
+    let input_file        = cli.input_file;
+    let n_rows: usize     = cli.n_rows;
+    let n_cols: usize     = cli.n_cols;
+    let maf_cutoff: f64   = cli.maf_cutoff;
+    let ld_threshold: f64 = cli.ld.unwrap_or(0.0);
+    let outdir            = cli.output_directory;
+
+    if n_rows < 2 {
+        eprintln!("Error: n_rows must be at least 2 (one header row plus at least one sample).");
+        return Ok(());
+    }
+    if maf_cutoff < 0.0 || maf_cutoff > 1.0 {
+        eprintln!("Error: maf_cutoff must be between 0 and 1, got {maf_cutoff}.");
+        return Ok(());
+    }
+    if !cli.dedup && (ld_threshold < 0.0 || ld_threshold > 1.0) {
+        eprintln!("Error: --ld threshold must be between 0 and 1, got {ld_threshold}.");
+        return Ok(());
+    }
+
     let method = if cli.dedup {
         Method::DedupOnly
     } else if cli.r {
@@ -101,22 +121,10 @@ fn main() -> Result<(), csv::Error> {
         Method::DPrime // default (also triggered by --dprime)
     };
 
-    let input_file   = cli.input_file;
-    let n_rows: usize     = cli.n_rows;
-    let n_cols: usize     = cli.n_cols;
-    let maf_cutoff: f64   = cli.maf_cutoff;
-    let ld_threshold: f64 = cli.ld.unwrap_or(0.0);
-    let outdir            = cli.output_directory;
-
     match method {
         Method::Correlation => println!("Method: |r|   threshold >= {ld_threshold}"),
         Method::DPrime      => println!("Method: D'    threshold >= {ld_threshold}"),
         Method::DedupOnly   => println!("Method: --dedup (hash-based exact duplicate removal only)"),
-    }
-
-    if n_rows < 2 {
-        eprintln!("Error: n_rows must be at least 2 (one header row plus at least one sample).");
-        return Ok(());
     }
 
     // ── Read data ────────────────────────────────────────────────────────────
@@ -126,6 +134,14 @@ fn main() -> Result<(), csv::Error> {
     // First row is the header (variant IDs stored as f64 column indices)
     let gt_header   = raw_gt_data.select(Axis(0), &[0usize]);
     let raw_gt_data = raw_gt_data.slice(s![1.., ..]).to_owned();
+
+    // Validate that all genotype values are 0 or 1
+    for val in raw_gt_data.iter() {
+        if *val != 0.0 && *val != 1.0 {
+            eprintln!("Error: genotype matrix contains value {val}; only 0 and 1 are permitted.");
+            return Ok(());
+        }
+    }
 
     // ── MAF filter ───────────────────────────────────────────────────────────
     let mafs = calc_maf(&raw_gt_data);
@@ -163,9 +179,13 @@ fn main() -> Result<(), csv::Error> {
         for j in (i + 1)..dedup_data.ncols() {
             if skip.contains(&j) { continue; }
 
+            // Compute both LD score and r-sign in one pass where possible.
+            // For --r, r is already the LD metric so we compute it once.
+            // For --dprime, we compute D' for the threshold and r separately for direction.
+            let r_signed = calculate_r(&dedup_data, i, j);
             let ld = match method {
                 Method::DPrime => calculate_d_prime(&dedup_data, i, j).abs(),
-                _              => calculate_r(&dedup_data, i, j).abs(),
+                _              => r_signed.abs(),
             };
 
             if ld >= ld_threshold {
@@ -175,7 +195,6 @@ fn main() -> Result<(), csv::Error> {
 
                 // Record direction using r (sign is the same for both r and D').
                 // Convert post-dedup indices to post-MAF indices for direction_map.
-                let r_signed       = calculate_r(&dedup_data, i, j);
                 let is_positive    = r_signed >= 0.0;
                 let prune_maf_idx  = dedup_keep_idx[prune];
                 let keep_maf_idx   = dedup_keep_idx[keep];
@@ -317,7 +336,6 @@ fn maf_filter(data: &Array2<f64>, mafs: &Array1<f64>, cutoff: &f64) -> (Array2<f
     (data.select(Axis(1), &keep), keep)
 }
 
-
 /// Hash-based exact duplicate removal — O(n·v), no pairwise comparisons.
 ///
 /// Each column is encoded as a `Vec<u8>` key (safe for haploid 0/1 data) and
@@ -407,18 +425,20 @@ fn calculate_d_prime(data: &ArrayBase<OwnedRepr<f64>, Dim<[usize; 2]>>, varianta
 
     /// Returns the four haplotype frequencies [f00, f10, f01, f11] for the
     /// pair (va, vb), where e.g. f10 = freq(allele1_A, allele0_B).
+    /// Counts in a single pass with no heap allocations.
     fn find_haplotype_frequencies(data: &Array2<f64>, va: usize, vb: usize) -> Array1<f64> {
-        let n       = data.nrows() as f64;
-        let a       = data.slice(s![.., va]);
-        let b       = data.slice(s![.., vb]);
-        let ab      = ndarray::stack![Axis(0), a, b]; // 2×n matrix; each column is one sample
-        let onezero = Array::from_shape_vec((2).f(), vec![1.0, 0.0]).unwrap();
-        let zeroone = Array::from_shape_vec((2).f(), vec![0.0, 1.0]).unwrap();
-        let f00 = ab.axis_iter(Axis(1)).filter(|&x| x == Array::zeros(2)).count() as f64;
-        let f10 = ab.axis_iter(Axis(1)).filter(|&x| x == onezero).count()          as f64;
-        let f01 = ab.axis_iter(Axis(1)).filter(|&x| x == zeroone).count()          as f64;
-        let f11 = ab.axis_iter(Axis(1)).filter(|&x| x == Array::ones(2)).count()   as f64;
-        ndarray::array![f00, f10, f01, f11].div(n)
+        let n = data.nrows() as f64;
+        let (mut f00, mut f10, mut f01, mut f11) = (0u64, 0u64, 0u64, 0u64);
+        for k in 0..data.nrows() {
+            match (data[[k, va]] as u8, data[[k, vb]] as u8) {
+                (0, 0) => f00 += 1,
+                (1, 0) => f10 += 1,
+                (0, 1) => f01 += 1,
+                (1, 1) => f11 += 1,
+                _      => {}
+            }
+        }
+        ndarray::array![f00 as f64, f10 as f64, f01 as f64, f11 as f64].div(n)
     }
 
     /// Compute D' from allele frequencies and haplotype frequencies for the pair.

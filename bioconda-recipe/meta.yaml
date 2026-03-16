@@ -24,8 +24,8 @@ requirements:
 
 test:
   commands:
-    # Smoke-test: the binary must be on PATH and respond to bad argument count
-    # with a usage message (exit 0).
+    # Smoke-test: the binary must be on PATH and print a usage/error message
+    # when called with no arguments. grep exits 0 if "usage" is found.
     - bacprune 2>&1 | grep -i usage
 
 about:
@@ -37,8 +37,8 @@ about:
     BacPrune-Rust prunes a haploid genotype matrix by linkage disequilibrium
     (LD) threshold. Three modes are available:
 
-      --r       Greedy pruning by |Pearson r| threshold (default).
-      --dprime  Greedy pruning by |D'| threshold.
+      --dprime  Greedy pruning by |D'| threshold (default).
+      --r       Greedy pruning by |Pearson r| threshold.
       --dedup   Hash-based exact-duplicate removal only (O(n·v), no pairwise
                 LD calculation).
 
