@@ -63,7 +63,7 @@ bacprune <input_file> <n_rows> <n_cols> <maf_cutoff> <output_directory> --dedup
 ```
 
 > [!TIP]
-`n_rows` includes the header row
+> `n_rows` includes the header row
 
 ```
 Usage: bacprune [OPTIONS] <INPUT_FILE> <N_ROWS> <N_COLS> <MAF_CUTOFF> <OUTPUT_DIRECTORY>
@@ -101,7 +101,7 @@ A CSV of numeric values. The first row is a header of (numeric) variant identifi
 ### Example Commands
 
 ```
-bacprune genotypes.csv 613 87092 0.05 ./results --ld 1           # D' (default) pruning for D'=1, filter samples with MAF<5%
+bacprune genotypes.csv 613 87092 0.05 ./results --ld 1           # D' (default) pruning for D'=1, filter variants with MAF<5%
 bacprune genotypes.csv 613 87092 0 ./results --ld 0.8 --r        # Pearson r pruning for r>0.8, no MAF filtering
 bacprune genotypes.csv 613 87092 0.01 ./results --dedup          # exact duplicates only, filter samples with MAF<1%
 ```

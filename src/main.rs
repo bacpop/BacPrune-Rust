@@ -114,6 +114,11 @@ fn main() -> Result<(), csv::Error> {
         Method::DedupOnly   => println!("Method: --dedup (hash-based exact duplicate removal only)"),
     }
 
+    if n_rows < 2 {
+        eprintln!("Error: n_rows must be at least 2 (one header row plus at least one sample).");
+        return Ok(());
+    }
+
     // ── Read data ────────────────────────────────────────────────────────────
     let raw_gt_data = read_csv(&input_file, n_rows, n_cols);
     println!("Data read successfully.");
@@ -210,6 +215,8 @@ fn write_outputs(
     outdir:        &str,
 ) -> Result<(), csv::Error> {
 
+    std::fs::create_dir_all(outdir).expect("Failed to create output directory");
+
     // 1. Results CSV ──────────────────────────────────────────────────────────
     let final_data = ndarray::concatenate![Axis(0), *header, *data];
     let string_arr = final_data.map(|e| e.to_string());
@@ -277,9 +284,11 @@ fn write_outputs(
 /// The caller is responsible for passing the correct dimensions; the function
 /// will panic if the file cannot be opened or parsed.
 fn read_csv(path_to_file: &str, n_rows: usize, n_cols: usize) -> Array2<f64> {
-    let file = File::open(path_to_file).expect("File not found :(");
+    let file = File::open(path_to_file)
+        .unwrap_or_else(|e| panic!("Error reading CSV '{}': {}", path_to_file, e));
     let mut reader = ReaderBuilder::new().has_headers(false).from_reader(file);
-    reader.deserialize_array2::<f64>((n_rows, n_cols)).expect("Failed to parse CSV as f64 array.")
+    reader.deserialize_array2::<f64>((n_rows, n_cols))
+        .unwrap_or_else(|e| panic!("Error reading CSV '{}': {}", path_to_file, e))
 }
 
 /// Compute the allele frequency for every variant (column).
@@ -383,21 +392,21 @@ fn calculate_r(data: &Array2<f64>, varianta: usize, variantb: usize) -> f64 {
 /// D' = 0 means no LD; D' = 1 means perfect LD (identical or complementary columns).
 /// Use `calculate_r` to obtain the sign (direction) of the association.
 fn calculate_d_prime(data: &ArrayBase<OwnedRepr<f64>, Dim<[usize; 2]>>, varianta: usize, variantb: usize) -> f64 {
-    let af = find_allele_frequencies(data);
+    let (f0a, f1a, f0b, f1b) = find_allele_frequencies(data, varianta, variantb);
     let hf = find_haplotype_frequencies(data, varianta, variantb);
-    return calc_d_prime(&af, &hf, varianta, variantb);
+    return calc_d_prime(f0a, f1a, f0b, f1b, &hf);
 
-    /// Returns a 2×v array where row 0 = freq(allele 0) and row 1 = freq(allele 1)
-    /// for each of the v variants.
-    fn find_allele_frequencies(data: &Array2<f64>) -> Array2<f64> {
-        let n     = data.nrows() as f64;
-        let freq1 = data.t().sum_axis(Axis(1)); // column sums = count of allele 1
-        let freq0 = n - &freq1;                 // count of allele 0
-        ndarray::stack![Axis(0), freq0, freq1].div(n)
+    /// Returns (freq_allele0_A, freq_allele1_A, freq_allele0_B, freq_allele1_B)
+    /// for variants va and vb only — O(n) instead of O(n·v).
+    fn find_allele_frequencies(data: &Array2<f64>, va: usize, vb: usize) -> (f64, f64, f64, f64) {
+        let n   = data.nrows() as f64;
+        let f1a = data.column(va).sum() / n;
+        let f1b = data.column(vb).sum() / n;
+        (1.0 - f1a, f1a, 1.0 - f1b, f1b)
     }
 
     /// Returns the four haplotype frequencies [f00, f10, f01, f11] for the
-    /// pair (varianta, variantb), where e.g. f10 = freq(allele1_A, allele0_B).
+    /// pair (va, vb), where e.g. f10 = freq(allele1_A, allele0_B).
     fn find_haplotype_frequencies(data: &Array2<f64>, va: usize, vb: usize) -> Array1<f64> {
         let n       = data.nrows() as f64;
         let a       = data.slice(s![.., va]);
@@ -412,15 +421,14 @@ fn calculate_d_prime(data: &ArrayBase<OwnedRepr<f64>, Dim<[usize; 2]>>, varianta
         ndarray::array![f00, f10, f01, f11].div(n)
     }
 
-    /// Compute D' from pre-computed allele frequencies `af` and haplotype
-    /// frequencies `hf` for the pair (va, vb).
-    fn calc_d_prime(af: &Array2<f64>, hf: &Array1<f64>, va: usize, vb: usize) -> f64 {
+    /// Compute D' from allele frequencies and haplotype frequencies for the pair.
+    fn calc_d_prime(f0a: f64, f1a: f64, f0b: f64, f1b: f64, hf: &Array1<f64>) -> f64 {
         let d = hf[0] * hf[3] - hf[1] * hf[2]; // D = f(00)·f(11) − f(10)·f(01)
         if d < 0.0 {
-            let d_max = f64::max(-af[[0,va]] * af[[0,vb]], -af[[1,va]] * af[[1,vb]]);
+            let d_max = f64::max(-f0a * f0b, -f1a * f1b);
             d / d_max
         } else if d > 0.0 {
-            let d_max = f64::min(af[[0,va]] * af[[1,vb]], af[[1,va]] * af[[0,vb]]);
+            let d_max = f64::min(f0a * f1b, f1a * f0b);
             d / d_max
         } else {
             0.0
