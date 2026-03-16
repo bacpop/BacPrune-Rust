@@ -124,7 +124,7 @@ fn main() -> Result<(), csv::Error> {
 
     // ── MAF filter ───────────────────────────────────────────────────────────
     let mafs = calc_maf(&raw_gt_data);
-    let (maf_data, maf_keep_idx) = maf_prune(&raw_gt_data, &mafs, &maf_cutoff);
+    let (maf_data, maf_keep_idx) = maf_filter(&raw_gt_data, &mafs, &maf_cutoff);
     let gt_header = gt_header.select(Axis(1), maf_keep_idx.as_slice());
 
     // Save the full post-MAF header before any LD pruning.  This is used later
@@ -292,7 +292,7 @@ fn calc_maf(data: &Array2<f64>) -> Array1<f64> {
 /// Remove variants whose MAF is strictly below `cutoff`.
 /// Returns the filtered matrix and the original column indices that were kept,
 /// so that the caller can apply the same filter to the header row.
-fn maf_prune(data: &Array2<f64>, mafs: &Array1<f64>, cutoff: &f64) -> (Array2<f64>, Vec<usize>) {
+fn maf_filter(data: &Array2<f64>, mafs: &Array1<f64>, cutoff: &f64) -> (Array2<f64>, Vec<usize>) {
     let keep: Vec<usize> = mafs
         .iter()
         .enumerate()
@@ -451,33 +451,88 @@ mod tests {
         assert!((mafs[1] - 0.5).abs() < 1e-10);
     }
 
-    // ── maf_prune ────────────────────────────────────────────────────────────
+    // ── calc_maf: edge cases ─────────────────────────────────────────────────
 
     #[test]
-    fn test_maf_prune_removes_low_maf() {
+    fn test_calc_maf_monomorphic_all_zero() {
+        // All-reference column → frequency 0.0
+        let data = array![[0.0], [0.0], [0.0]];
+        let mafs = calc_maf(&data);
+        assert!((mafs[0] - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_calc_maf_monomorphic_all_one() {
+        // All-alternate column → frequency 1.0
+        let data = array![[1.0], [1.0], [1.0]];
+        let mafs = calc_maf(&data);
+        assert!((mafs[0] - 1.0).abs() < 1e-10);
+    }
+
+    // ── maf_filter ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_maf_filter_removes_low_maf() {
         let data = array![[1.0, 0.0], [0.0, 0.0], [1.0, 0.0], [0.0, 0.0]];
         let mafs = array![0.5, 0.0];
-        let (filtered, keep_idx) = maf_prune(&data, &mafs, &0.01);
+        let (filtered, keep_idx) = maf_filter(&data, &mafs, &0.01);
         assert_eq!(filtered.ncols(), 1);
         assert_eq!(keep_idx, vec![0]);
     }
 
     #[test]
-    fn test_maf_prune_keeps_at_cutoff() {
+    fn test_maf_filter_keeps_at_cutoff() {
+        // MAF exactly equal to cutoff is kept (>=, not >)
         let data = array![[1.0, 0.0], [0.0, 0.0]];
         let mafs = array![0.5, 0.01];
-        let (filtered, keep_idx) = maf_prune(&data, &mafs, &0.01);
+        let (filtered, keep_idx) = maf_filter(&data, &mafs, &0.01);
         assert_eq!(filtered.ncols(), 2);
         assert_eq!(keep_idx, vec![0, 1]);
     }
 
     #[test]
-    fn test_maf_prune_returns_correct_keep_index() {
+    fn test_maf_filter_returns_correct_keep_index() {
+        // Middle column removed; indices 0 and 2 must be returned
         let data = array![[1.0, 0.0, 1.0], [0.0, 0.0, 0.0]];
         let mafs = array![0.5, 0.0, 0.5];
-        let (filtered, keep_idx) = maf_prune(&data, &mafs, &0.01);
+        let (filtered, keep_idx) = maf_filter(&data, &mafs, &0.01);
         assert_eq!(filtered.ncols(), 2);
         assert_eq!(keep_idx, vec![0, 2]);
+    }
+
+    #[test]
+    fn test_maf_filter_removes_all() {
+        // All variants below cutoff → empty matrix
+        let data = array![[0.0, 0.0], [0.0, 0.0]];
+        let mafs = array![0.0, 0.0];
+        let (filtered, keep_idx) = maf_filter(&data, &mafs, &0.01);
+        assert_eq!(filtered.ncols(), 0);
+        assert!(keep_idx.is_empty());
+    }
+
+    #[test]
+    fn test_maf_filter_zero_cutoff_keeps_all() {
+        // Cutoff of 0.0 keeps every variant including monomorphic
+        let data = array![[1.0, 0.0], [0.0, 0.0], [1.0, 0.0]];
+        let mafs = array![0.5, 0.0];
+        let (filtered, keep_idx) = maf_filter(&data, &mafs, &0.0);
+        assert_eq!(filtered.ncols(), 2);
+        assert_eq!(keep_idx, vec![0, 1]);
+    }
+
+    #[test]
+    fn test_maf_filter_preserves_column_data() {
+        // Verify the actual values in the surviving column are correct
+        let data = array![
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0],
+        ];
+        let mafs = array![2.0/3.0, 0.0, 1.0/3.0];
+        let (filtered, _) = maf_filter(&data, &mafs, &0.1);
+        // Only cols 0 and 2 survive; check their values are unchanged
+        assert_eq!(filtered.column(0).to_vec(), vec![1.0, 0.0, 1.0]);
+        assert_eq!(filtered.column(1).to_vec(), vec![0.0, 1.0, 0.0]);
     }
 
     // ── dedup_variants ───────────────────────────────────────────────────────
