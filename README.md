@@ -52,58 +52,34 @@ pip install .
 
 ## Usage
 
-BacPrune offers three main modes: pruning by Pearson's r, pruning by D' score, and pruning only variants with identical presence and absence (perfect positive correlation).
-
-D' score is recommended for use in GWAS applications where LD pruning is used to reduce nonidentifiability due to correlations between variants, as this will prune both strong positive and strong negative correlations.
-
-To run BacPrune-Rust with D' or Pearson's r:
+Three modes are available. D' is recommended for GWAS applications as it prunes both positive and negative correlations.
 
 ```
 bacprune <input_file> <n_rows> <n_cols> <maf_cutoff> <output_directory> --ld <threshold> [--r|--dprime]
-```
-
-To only prune for perfect positive correlations:
-
-```
 bacprune <input_file> <n_rows> <n_cols> <maf_cutoff> <output_directory> --dedup
 ```
 
-Run `bacprune --help` for full usage or `bacprune --version` to check the installed version.
+| Argument | Description |
+|----------|-------------|
+| `input_file` | Path to input CSV |
+| `n_rows` | Number of rows **including the header row** |
+| `n_cols` | Number of columns |
+| `maf_cutoff` | Variants with allele frequency below this are removed |
+| `output_directory` | Directory for output files |
+| `--ld <threshold>` | Prune pairs at or above this score (required for `--r`/`--dprime`) |
 
-### Positional arguments
+| Flag | Method | `--ld` required? |
+|------|--------|-----------------|
+| `--dprime` | \|D'\| — default | Yes |
+| `--r` | \|Pearson r\| | Yes |
+| `--dedup` | Exact hash match only | No |
 
-- `input_file`: Path to the input CSV (see [Input format](#input-format))
-- `n_rows`: Total number of rows in the CSV **including the header row**
-- `n_cols`: Number of columns
-- `maf_cutoff`: Minor allele frequency cutoff; variants below this threshold are removed before LD pruning
-- `output_directory`: Directory where output files are written
-
-### Options
-
-- `--ld <threshold>`: LD pruning threshold; pairs at or above this value are pruned. Required for `--r` and `--dprime`, not used with `--dedup`
-- `--help` / `-h`: Print help
-- `--version` / `-V`: Print version
-
-### Method flags
-
-Choose one; the default when no flag is given is `--dprime`.
-
-| Flag       | LD metric | Pairwise? | `--ld` required? |
-|------------|-----------|-----------|-----------------|
-| `--dprime` | D' | Yes | Yes |
-| `--r`      | \|Pearson r\| | Yes | Yes |
-| `--dedup`  | Exact hash match | No (O(n·v)) | No |
+Run `bacprune --help` for full usage.
 
 ### Input format
 
-The input must be a **headerless-style CSV** where every value — including the first row — is numeric (f64).
-The first row is treated as a header of variant identifiers (e.g. base-1 column indices); subsequent rows are samples.
+A CSV where every value is numeric (f64). The first row is a header of variant identifiers; subsequent rows are samples, with values `0` (reference) or `1` (alternate allele).
 
-- **Rows**: samples (individuals)
-- **Columns**: variants (SNPs / loci)
-- **Values**: haploid genotype calls encoded as `0` (reference allele) or `1` (alternate allele)
-
-Example (3 samples, 4 variants, numeric header):
 ```
 1,2,3,4
 0,1,0,1
@@ -111,7 +87,7 @@ Example (3 samples, 4 variants, numeric header):
 0,0,1,1
 ```
 
-`n_rows` must include the header row (so a file with 3 samples has `n_rows = 4`).
+`n_rows` includes the header (3 samples → `n_rows = 4`).
 
 > [!NOTE]
 > The MAF filter operates on the frequency of the allele encoded as `1`. This means it removes variants where the alternate allele is rare, but will not remove variants where the *reference* allele is rare (i.e. high-frequency alternates). To filter out both rare ALT and rare REF alleles, normalise your input so that the alternate allele is always `1` and the reference allele is always `0` before running BacPrune.
@@ -119,104 +95,27 @@ Example (3 samples, 4 variants, numeric header):
 ### Examples
 
 ```bash
-# Prune with D' >= 0.95  (default method)
-bacprune genotypes.csv 604 1000 0.01 ./results --ld 0.95
-
-# Prune with D' >= 0.95  (explicit flag)
-bacprune genotypes.csv 604 1000 0.01 ./results --ld 0.95 --dprime
-
-# Prune with |r| >= 0.8
-bacprune genotypes.csv 604 1000 0.01 ./results --ld 0.8 --r
-
-# Remove exact duplicate variants only (no LD threshold)
-bacprune genotypes.csv 604 1000 0.01 ./results --dedup
+bacprune genotypes.csv 604 1000 0.01 ./results --ld 0.95           # D' (default)
+bacprune genotypes.csv 604 1000 0.01 ./results --ld 0.8 --r        # Pearson r
+bacprune genotypes.csv 604 1000 0.01 ./results --dedup             # exact duplicates only
 ```
 
 ## Output files
 
 All files are written to `<output_directory>`.
 
-### `bacprune_rust_results.csv`
+**`bacprune_rust_results.csv`** — pruned genotype matrix in the same format as the input.
 
-The pruned genotype matrix in the same format as the input (numeric header row + sample rows, one variant per column).
+**`ld_pruning_summary.csv`** — one row per representative SNP, listing the post-MAF-filter column indices (base 0) of all variants pruned from its group.
 
-### `ld_pruning_summary.csv`
-
-Two-column CSV recording the representative kept for each group of redundant variants.
-Indices are in post-MAF-filter column space (base 0).
-
-| Column | Description |
-|--------|-------------|
-| `Representative SNP (base 0 indexing)` | Column index of the variant that was kept |
-| `Pruned SNPs (base 0 indexing)` | Comma-separated column indices of all variants pruned from this group |
-
-### `direction_of_correlation.csv`
-
-One row per variant that passed the MAF filter (both kept and pruned).
-Records whether each pruned variant was positively or negatively correlated with its representative.
-
-| Column | Description |
-|--------|-------------|
-| `Variant` | Variant identifier (from the input header row) |
-| `Status` | `representative`, `positive_correlation`, or `negative_correlation` |
-| `Representative Variant` | Identifier of the representative; equals `Variant` for representatives |
-
-`positive_correlation` means the pruned variant's genotype pattern matches its representative (r > 0, i.e. identical allele calls).
-`negative_correlation` means the pruned variant is the complement of its representative (r < 0, i.e. allele calls are flipped at every sample).
+**`direction_of_correlation.csv`** — one row per post-MAF variant. `Status` is `representative`, `positive_correlation` (identical genotype pattern, r > 0), or `negative_correlation` (complement pattern, r < 0).
 
 ## Algorithm
 
-Pruning runs in two phases:
+**Phase 1 (all modes):** each variant column is hashed as a `Vec<u8>` and inserted into a hash map. Exact duplicates are removed in a single O(n·v) pass. Complementary columns hash differently and are both retained.
 
-### Phase 1 — exact duplicate removal (all modes)
+**Phase 2 (`--r` and `--dprime` only):** greedy pairwise scan over remaining variants. For each pair exceeding the `--ld` threshold, the lower-MAF variant is pruned. The sign of r determines the correlation direction recorded in `direction_of_correlation.csv`.
 
-Each variant column is encoded as a `Vec<u8>` key and inserted into a hash map.
-The first occurrence of each unique genotype pattern is kept; all later identical columns are recorded as pruned with `positive_correlation`.
-This is **O(n·v)** where n = samples and v = variants — no pairwise comparisons are performed.
+**Pearson r:** `r = (n·Σxy − Σx·Σy) / √(Σx·(n−Σx) · Σy·(n−Σy))` — threshold applied to |r|.
 
-Note: complementary columns (one is the bitwise NOT of the other) encode to different keys and are both retained by phase 1.
-
-### Phase 2 — LD threshold pruning (`--r` and `--dprime` only)
-
-A greedy pairwise scan over the variants remaining after phase 1.
-For each pair (i, j):
-
-1. Compute |r| (Pearson r) or |D'| (Lewontin's D').
-2. If the score ≥ `--ld` threshold, the variant with the **lower MAF** is pruned; the higher-MAF variant is kept as the representative.
-3. The sign of r (regardless of whether `--r` or `--dprime` was used) determines the correlation direction written to `direction_of_correlation.csv`.
-
-### LD metrics
-
-**Pearson r (`--r`)**
-
-Standard correlation coefficient between two binary vectors:
-
-```
-r = (n·Σxy − Σx·Σy) / √(Σx·(n−Σx) · Σy·(n−Σy))
-```
-
-r = 0 → independent; |r| = 1 → perfect LD (identical or complementary).
-The pruning threshold is applied to |r|.
-
-**D' (`--dprime`, default)**
-
-Lewontin's normalised disequilibrium coefficient:
-
-```
-D  = f(00)·f(11) − f(10)·f(01)
-D' = D / D_max
-```
-
-where D_max is the maximum possible |D| given the observed allele frequencies.
-This implementation returns |D'|, so results are always in [0, 1].
-D' = 0 → no LD; D' = 1 → perfect LD (identical or complementary columns).
-The correlation direction (positive / negative) is determined separately using r, since D' discards the sign.
-
-## Other versions
-
-Earlier implementations are kept in `r_and_stan_versions/` for reference but are no longer actively developed:
-
-| Version | Notes |
-|---------|-------|
-| **R** (`bac_prune.R`) | Functionally correct but too slow for large datasets |
-| **Stan** (`bac_prune.Stan`) | Early experimental attempt; not a pruning tool |
+**D':** `D = f(00)·f(11) − f(10)·f(01)`, normalised by D_max. Always returns |D'| ∈ [0, 1]. Correlation direction is determined separately via r since D' discards the sign.
