@@ -41,7 +41,7 @@ pip install .
 
 ## Usage
 
-BacPrune offers three modes: pruning by D' score, pruning by Pearson r, and pruning only variants with identical presence and absence (perfect positive correlation) which is determined by variant hashes. D' score is recommended for use in GWAS applications where LD pruning is used to reduce nonidentifiability arising from correlations between variants, as this will prune both strong positive and strong negative correlations.
+BacPrune offers three modes: pruning by r² (Pearson r-squared), pruning by |D'| (Lewontin's D'), and pruning only variants with identical presence and absence (perfect positive correlation) which is determined by variant hashes. r² is the default and is commonly used for LD pruning in GWAS. D' is an alternative that captures both strong positive and strong negative correlations and may be preferred when the direction of correlation matters.
 
 ```
 Usage: bacprune [OPTIONS] <INPUT_FILE> <N_ROWS> <N_COLS> <MAF_CUTOFF> <OUTPUT_DIRECTORY>
@@ -55,8 +55,8 @@ Arguments:
 
 Options:
       --ld <THRESHOLD>  LD pruning threshold; pairs at or above this value are pruned. Required for --r and --dprime; not used with --dedup
-      --r               Prune by |Pearson r| threshold
-      --dprime          Prune by |D'| (Lewontin's D') threshold [default method]
+      --r               Prune by r² (Pearson r-squared) threshold [default method]
+      --dprime          Prune by |D'| (Lewontin's D') threshold
       --dedup           Remove exact duplicate variants only via hashing; no pairwise LD calculation
   -h, --help            Print help
   -V, --version         Print version
@@ -75,11 +75,11 @@ The genotype matrix should be in CSV format, with the first row being a header o
 ### Example Commands
 
 ```
-# D' (default) pruning for D'=1, filter variants with MAF<5%
-bacprune genotypes.csv 613 87092 0.05 ./results --ld 1
+# r² (default) pruning for r²≥0.8, filter variants with MAF<5%
+bacprune genotypes.csv 613 87092 0.05 ./results --ld 0.8
 
-# Pearson r pruning for |r|≥0.8, no MAF filtering
-bacprune genotypes.csv 613 87092 0 ./results --ld 0.8 --r
+# D' pruning for |D'|=1, filter variants with MAF<5%
+bacprune genotypes.csv 613 87092 0.05 ./results --ld 1 --dprime
 
 # exact duplicates only, filter variants with MAF<1%
 bacprune genotypes.csv 613 87092 0.01 ./results --dedup 
@@ -97,8 +97,8 @@ All files are written to `<output_directory>`.
 
 **Phase 1 (all modes):** each variant column is hashed as a `Vec<u8>` and inserted into a hash map. Exact duplicates are removed in a single O(n·v) pass. Complementary columns hash differently and are both retained.
 
-**Phase 2 (`--r` and `--dprime` only):** greedy pairwise scan over remaining variants. For each pair exceeding the `--ld` threshold, the lower-MAF variant is pruned. The sign of r determines the correlation direction recorded in `direction_of_correlation.csv`.
+**Phase 2 (`--r` and `--dprime` only):** greedy pairwise scan over remaining variants. For each pair exceeding the `--ld` threshold, the lower-MAF variant is pruned. The sign of r determines the correlation direction recorded in `direction_of_correlation.csv` for both modes.
 
-**Pearson r:** `r = (n·Σxy − Σx·Σy) / √(Σx·(n−Σx) · Σy·(n−Σy))` — threshold applied to |r|.
+**Pearson r²:** `r = (n·Σxy − Σx·Σy) / √(Σx·(n−Σx) · Σy·(n−Σy))` — threshold applied to r². The sign of r determines the correlation direction recorded in `direction_of_correlation.csv`.
 
 **D':** `D = f(00)·f(11) − f(10)·f(01)`, normalised by D_max. Always returns |D'| ∈ [0, 1]. Correlation direction is determined separately via r since D' discards the sign.

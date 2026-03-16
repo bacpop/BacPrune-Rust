@@ -4,9 +4,9 @@
 //   Phase 1 (all modes): hash-based exact duplicate removal — O(n·v), no pairwise work.
 //   Phase 2 (--r / --dprime): greedy pairwise pruning by an LD threshold.
 //
-// Method flags (choose one; default is --dprime):
-//   --dprime  Prune by |D'| threshold                 (default)
-//   --r       Prune by |Pearson r| threshold
+// Method flags (choose one; default is --r):
+//   --r       Prune by r² (Pearson r-squared) threshold    (default)
+//   --dprime  Prune by |D'| threshold
 //   --dedup   Phase 1 only — remove exact duplicates, skip threshold pruning
 //
 // Output files (written to <output_directory>):
@@ -66,11 +66,11 @@ struct Cli {
           conflicts_with = "dedup")]
     ld: Option<f64>,
 
-    /// Prune by |Pearson r| threshold
+    /// Prune by r² (Pearson r-squared) threshold [default method]
     #[arg(long, conflicts_with_all = ["dprime", "dedup"])]
     r: bool,
 
-    /// Prune by |D'| (Lewontin's D') threshold [default method]
+    /// Prune by |D'| (Lewontin's D') threshold
     #[arg(long, conflicts_with_all = ["r", "dedup"])]
     dprime: bool,
 
@@ -115,15 +115,15 @@ fn main() -> Result<(), csv::Error> {
 
     let method = if cli.dedup {
         Method::DedupOnly
-    } else if cli.r {
-        Method::Correlation
+    } else if cli.dprime {
+        Method::DPrime
     } else {
-        Method::DPrime // default (also triggered by --dprime)
+        Method::Correlation // default (also triggered by --r)
     };
 
     match method {
-        Method::Correlation => println!("Method: |r|   threshold >= {ld_threshold}"),
-        Method::DPrime      => println!("Method: D'    threshold >= {ld_threshold}"),
+        Method::Correlation => println!("Method: r²    threshold >= {ld_threshold}"),
+        Method::DPrime      => println!("Method: |D'|  threshold >= {ld_threshold}"),
         Method::DedupOnly   => println!("Method: --dedup (hash-based exact duplicate removal only)"),
     }
 
@@ -179,13 +179,12 @@ fn main() -> Result<(), csv::Error> {
         for j in (i + 1)..dedup_data.ncols() {
             if skip.contains(&j) { continue; }
 
-            // Compute both LD score and r-sign in one pass where possible.
-            // For --r, r is already the LD metric so we compute it once.
-            // For --dprime, we compute D' for the threshold and r separately for direction.
-            let r_signed = calculate_r(&dedup_data, i, j);
-            let ld = match method {
-                Method::DPrime => calculate_d_prime(&dedup_data, i, j).abs(),
-                _              => r_signed.abs(),
+            // Compute the LD metric. For --r, cache r so the sign is available
+            // for direction tracking without a second call. For --dprime, r is
+            // only needed when the threshold is actually exceeded.
+            let (ld, r_cache) = match method {
+                Method::DPrime => (calculate_d_prime(&dedup_data, i, j), None),
+                _              => { let r = calculate_r(&dedup_data, i, j); (r * r, Some(r)) },
             };
 
             if ld >= ld_threshold {
@@ -193,11 +192,13 @@ fn main() -> Result<(), csv::Error> {
                 let (keep, prune) = if mafs[i] >= mafs[j] { (i, j) } else { (j, i) };
                 skip.insert(prune);
 
-                // Record direction using r (sign is the same for both r and D').
+                // Record direction using r (sign is the same for both r² and |D'|).
+                // For --dprime, compute r only now (threshold was exceeded).
                 // Convert post-dedup indices to post-MAF indices for direction_map.
-                let is_positive    = r_signed >= 0.0;
-                let prune_maf_idx  = dedup_keep_idx[prune];
-                let keep_maf_idx   = dedup_keep_idx[keep];
+                let r_signed      = r_cache.unwrap_or_else(|| calculate_r(&dedup_data, i, j));
+                let is_positive   = r_signed >= 0.0;
+                let prune_maf_idx = dedup_keep_idx[prune];
+                let keep_maf_idx  = dedup_keep_idx[keep];
                 direction_map.insert(prune_maf_idx, (keep_maf_idx, is_positive));
 
                 // If i itself was just pruned, it can no longer act as a
@@ -375,8 +376,9 @@ fn dedup_variants(data: &Array2<f64>) -> (Array2<f64>, Vec<usize>, DirectionMap)
 /// Uses the computational form:
 ///   r = (n·Σxy − Σx·Σy) / √((Σx·(n−Σx)) · (Σy·(n−Σy)))
 ///
-/// Returns a value in [−1, 1].  Returns 0 if either column is monomorphic
+/// Returns a value in [−1, 1].  Returns 0.0 if either column is monomorphic
 /// (zero variance), avoiding a division-by-zero.
+/// Square the result to obtain r² for use as an LD metric.
 fn calculate_r(data: &Array2<f64>, varianta: usize, variantb: usize) -> f64 {
     let n      = data.nrows() as f64;
     let col_a  = data.column(varianta);

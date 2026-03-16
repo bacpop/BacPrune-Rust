@@ -37,8 +37,8 @@ about:
     BacPrune-Rust prunes a haploid genotype matrix by linkage disequilibrium
     (LD) threshold. Three modes are available:
 
-      --dprime  Greedy pruning by |D'| threshold (default).
-      --r       Greedy pruning by |Pearson r| threshold.
+      --r       Greedy pruning by r² (Pearson r-squared) threshold (default).
+      --dprime  Greedy pruning by |D'| threshold.
       --dedup   Hash-based exact-duplicate removal only (O(n·v), no pairwise
                 LD calculation).
 
