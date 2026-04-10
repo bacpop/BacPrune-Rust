@@ -230,10 +230,11 @@ fn main() -> Result<(), csv::Error> {
         }
     }
 
-    let phase2_keep: Vec<usize> = (0..work_data.ncols())
+    let mut phase2_keep: Vec<usize> = (0..work_data.ncols())
         .filter(|x| !skip.contains(x))
         .map(|x| sort_perm[x])  // map back to dedup indices
         .collect();
+    phase2_keep.sort();  // restore original column order
     let pruned_data   = dedup_data.select(Axis(1), &phase2_keep);
     let pruned_header = gt_header.select(Axis(1), &phase2_keep);
     println!("LD threshold pruning complete. {} variants kept.", pruned_data.ncols());
@@ -284,7 +285,10 @@ fn write_outputs(
     let mut wtr = csv::Writer::from_writer(file);
     wtr.write_record(&["Representative SNP (base 0 indexing)", "Pruned SNPs (base 0 indexing)"])
         .expect("Error writing summary header");
-    for (rep, pruned) in &rep_snps {
+    let mut rep_keys: Vec<usize> = rep_snps.keys().copied().collect();
+    rep_keys.sort();
+    for rep in &rep_keys {
+        let pruned = &rep_snps[rep];
         let pruned_str = pruned.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(", ");
         wtr.write_record(&[rep.to_string(), pruned_str]).expect("Error writing summary record");
     }
