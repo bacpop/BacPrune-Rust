@@ -5,14 +5,11 @@ package:
   version: {{ version }}
 
 source:
-  # Replace the URL and sha256 with those of the actual GitHub release tag.
-  # Run `sha256sum bacprune-v{{ version }}.tar.gz` after downloading to get the hash.
   url: https://github.com/bacpop/BacPrune-Rust/archive/refs/tags/v{{ version }}.tar.gz
   sha256: <SHA256_PLACEHOLDER>
 
 build:
   number: 0
-  # Cargo installs the `bacprune` binary into $PREFIX/bin.
   script: cargo install --locked --root "${PREFIX}" --path .
   run_exports:
     - {{ pin_subpackage('bacprune', max_pin="x.x") }}
@@ -24,9 +21,8 @@ requirements:
 
 test:
   commands:
-    # Smoke-test: the binary must be on PATH and print a usage/error message
-    # when called with no arguments. grep exits 0 if "usage" is found.
-    - bacprune 2>&1 | grep -i usage
+    - bacprune --help
+    - bacprune --version | grep -q "{{ version }}"
 
 about:
   home: https://github.com/bacpop/BacPrune-Rust
