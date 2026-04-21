@@ -11,7 +11,14 @@
 //
 // Output files (written to <output_directory>):
 //   bacprune_rust_results.csv      — pruned genotype matrix with header
-//   ld_pruning_summary.csv         — representative SNP → list of pruned SNPs
+//   ld_pruning_summary.csv         — representative variant → list of pruned
+//                                    variants. Both columns contain the
+//                                    original variant IDs preserved from the
+//                                    input header row (NOT post-MAF
+//                                    positions), so callers can cross-
+//                                    reference them against the results CSV
+//                                    header directly regardless of the MAF
+//                                    cutoff in use.
 //   direction_of_correlation.csv   — per-variant status and correlation direction
 //                                    relative to its representative
 
@@ -275,7 +282,11 @@ fn write_outputs(
     wtr.flush()?;
 
     // 2. Summary CSV ──────────────────────────────────────────────────────────
-    // Derive rep → pruned list from direction_map.
+    // Derive rep → pruned list from direction_map.  The direction_map keys
+    // are post-MAF column indices; translate them to original variant IDs
+    // (as preserved in `maf_gt_header`) so downstream tools can cross-
+    // reference them against the results CSV header and any caller-supplied
+    // position/annotation table without needing to replicate the MAF filter.
     let mut rep_snps: HashMap<usize, Vec<usize>> = HashMap::new();
     for (&pruned, &(rep, _)) in direction_map {
         rep_snps.entry(rep).or_insert_with(Vec::new).push(pruned);
@@ -283,14 +294,34 @@ fn write_outputs(
     let summary_path = Path::new(outdir).join("ld_pruning_summary.csv");
     let file = OpenOptions::new().write(true).create(true).truncate(true).open(summary_path).unwrap();
     let mut wtr = csv::Writer::from_writer(file);
-    wtr.write_record(&["Representative SNP (base 0 indexing)", "Pruned SNPs (base 0 indexing)"])
+    wtr.write_record(&["Representative Variant", "Pruned Variants"])
         .expect("Error writing summary header");
+    // Sort representatives by their original variant ID (via maf_gt_header
+    // lookup) rather than by their post-MAF position.  With the current MAF
+    // filter these orderings are equivalent, but sorting by variant ID keeps
+    // the contract explicit and robust to future reorderings.
     let mut rep_keys: Vec<usize> = rep_snps.keys().copied().collect();
-    rep_keys.sort();
+    rep_keys.sort_by(|&a, &b| {
+        maf_gt_header[[0, a]]
+            .partial_cmp(&maf_gt_header[[0, b]])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     for rep in &rep_keys {
-        let pruned = &rep_snps[rep];
-        let pruned_str = pruned.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(", ");
-        wtr.write_record(&[rep.to_string(), pruned_str]).expect("Error writing summary record");
+        // Sort each representative's pruned-variant list by original ID too
+        // so the emitted order is human-readable.
+        let mut pruned = rep_snps[rep].clone();
+        pruned.sort_by(|&a, &b| {
+            maf_gt_header[[0, a]]
+                .partial_cmp(&maf_gt_header[[0, b]])
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let rep_id     = maf_gt_header[[0, *rep]].to_string();
+        let pruned_str = pruned
+            .iter()
+            .map(|&idx| maf_gt_header[[0, idx]].to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        wtr.write_record(&[rep_id, pruned_str]).expect("Error writing summary record");
     }
     wtr.flush()?;
 
