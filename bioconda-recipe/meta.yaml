@@ -1,4 +1,4 @@
-{% set version = "0.9.0" %}
+{% set version = "0.9.1" %}
 
 package:
   name: bacprune
@@ -6,19 +6,18 @@ package:
 
 source:
   url: https://github.com/bacpop/BacPrune-Rust/archive/refs/tags/v{{ version }}.tar.gz
-  sha256: f81039b4e666cf8e8787490b55031ba73a5d9a4192af58fdb4c7da74a6a7dab8
+  sha256: 
 
 build:
   number: 0
-  script: cargo install --locked --root "${PREFIX}" --path .
+  script: cargo install --locked --root "${PREFIX}" --path . --no-track
   run_exports:
     - {{ pin_subpackage('bacprune', max_pin="x.x") }}
 
 requirements:
   build:
     - {{ compiler('rust') }}
-    - {{ stdlib('c') }}
-
+    
 test:
   commands:
     - bacprune --help
@@ -45,3 +44,8 @@ about:
 extra:
   recipe-maintainers:
     - qtoussaint
+  additional-platforms:
+    - linux-aarch64
+    - osx-arm64
+  skip-lints:
+    - compiler_needs_stdlib_c
